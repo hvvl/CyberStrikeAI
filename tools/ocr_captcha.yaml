@@ -24,15 +24,13 @@ args:
     def download_and_ocr(url, headers=None):
         """Download captcha image from URL and OCR it."""
         try:
-            import urllib.request
+            import urllib.request, tempfile
             req = urllib.request.Request(url, headers=headers or {"User-Agent": "Mozilla/5.0"})
             img_bytes = urllib.request.urlopen(req, timeout=15).read()
-            # Save to temp
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            with tempfile.NamedTemporaryFile(suffix=".png") as f:
                 f.write(img_bytes)
-                tmp_path = f.name
-            return ocr(tmp_path)
+                f.flush()
+                return ocr(f.name)
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
