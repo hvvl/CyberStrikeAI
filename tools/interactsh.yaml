@@ -1,5 +1,150 @@
 name: "interactsh"
-command: "interactsh-client"
+command: "python3"
+args:
+  - "-c"
+  - |
+    import sys, json, subprocess, os, time, signal, re
+
+    action = sys.argv[1] if len(sys.argv) > 1 else "start"
+
+    # Persisted state file for correlation_id between start/poll calls
+    STATE_FILE = os.path.join(os.environ.get("CYBERSTRIKE_WORKSPACE", "/tmp"), ".interactsh_state.json")
+
+    def save_state(correlation_id, domain, server):
+        with open(STATE_FILE, "w") as f:
+            json.dump({"correlation_id": correlation_id, "domain": domain, "server": server, "ts": time.time()}, f)
+
+    def load_state():
+        try:
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def start(server="oast.pro"):
+        """Start interactsh-client briefly to get a unique domain, then kill it.
+        The state (correlation_id + domain) is saved for later polling."""
+        try:
+            # Run interactsh-client for a few seconds to get the domain registration
+            proc = subprocess.Popen(
+                ["interactsh-client", "-server", server, "-v"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdin=subprocess.PIPE, text=True
+            )
+            output_lines = []
+            start_time = time.time()
+            domain = None
+            correlation_id = None
+            while time.time() - start_time < 15:
+                line = proc.stdout.readline()
+                if not line:
+                    if proc.poll() is not None:
+                        break
+                    time.sleep(0.2)
+                    continue
+                output_lines.append(line.strip())
+                # Look for the domain line (e.g. "abc123.oast.pro")
+                for l in output_lines:
+                    m = re.search(r'([a-z0-9]+\.' + re.escape(server) + r')', l)
+                    if m:
+                        domain = m.group(1)
+                    # interactsh also prints correlation ID
+                    m2 = re.search(r'(?:correlation|ident|token)[:\s]+([a-f0-9]{20,})', l, re.I)
+                    if m2:
+                        correlation_id = m2.group(1)
+                if domain:
+                    break
+
+            # Kill the client process
+            try:
+                proc.send_signal(signal.SIGTERM)
+                proc.wait(timeout=3)
+            except Exception:
+                proc.kill()
+
+            if domain:
+                # Also capture any remaining output for the correlation
+                remaining = proc.stdout.read() if proc.stdout else ""
+                save_state(correlation_id or "unknown", domain, server)
+                return {
+                    "status": "started",
+                    "interaction_domain": domain,
+                    "correlation_id": correlation_id,
+                    "instructions": f"Use {domain} in your payload (e.g. in URL, hostname, or XML entity). Then call interactsh with action=poll to check for callbacks.",
+                    "raw_output": "\n".join(output_lines[:10])
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": "Failed to get interaction domain. Check if interactsh-client is installed and server is reachable.",
+                    "raw_output": "\n".join(output_lines[:15])
+                }
+        except FileNotFoundError:
+            return {"status": "error", "message": "interactsh-client not installed. Run: go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def poll(correlation_id=None, server="oast.pro"):
+        """Reconnect to interactsh-server with the correlation_id and check for interactions."""
+        state = load_state()
+        if not correlation_id and state:
+            correlation_id = state.get("correlation_id")
+            if state.get("server"):
+                server = state["server"]
+
+        if correlation_id and correlation_id != "unknown":
+            # Try reconnecting with existing correlation ID
+            try:
+                proc = subprocess.Popen(
+                    ["interactsh-client", "-server", server, "-id", correlation_id, "-v"],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    stdin=subprocess.PIPE, text=True
+                )
+                output_lines = []
+                start_time = time.time()
+                interactions = []
+                while time.time() - start_time < 10:
+                    line = proc.stdout.readline()
+                    if not line:
+                        if proc.poll() is not None:
+                            break
+                        time.sleep(0.3)
+                        continue
+                    output_lines.append(line.strip())
+                    # Parse interaction lines (interactsh prints them as they come)
+                    if any(kw in line.lower() for kw in ["dns", "http", "smtp", "ldap", "interaction", "received"]):
+                        interactions.append(line.strip())
+                try:
+                    proc.send_signal(signal.SIGTERM)
+                    proc.wait(timeout=3)
+                except Exception:
+                    proc.kill()
+
+                return {
+                    "status": "polled",
+                    "correlation_id": correlation_id,
+                    "interactions": interactions,
+                    "has_callback": len(interactions) > 0,
+                    "interaction_count": len(interactions),
+                    "raw_output": "\n".join(output_lines[:20])
+                }
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+        else:
+            # No correlation ID - start a fresh brief listener and report any immediate interactions
+            return start(server)
+
+    server = sys.argv[2] if len(sys.argv) > 2 else "oast.pro"
+
+    if action == "start":
+        result = start(server)
+    elif action == "poll":
+        cid = sys.argv[3] if len(sys.argv) > 3 else None
+        result = poll(cid, server)
+    else:
+        result = {"error": f"Unknown action '{action}'. Use 'start' or 'poll'."}
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 enabled: true
 short_description: "OOB带外检测：启动interactsh获取唯一交互域名，用于blind XXE/SSRF/SQLi/RCE验证"
 description: |
@@ -15,59 +160,55 @@ description: |
   - Blind 文件包含
 
   ## 工作原理
-  1. interactsh-client 连接 interactsh-server，获取一个唯一子域名（如 abc123.oast.pro）
-  2. 在 payload 中使用此子域名（如 `<!ENTITY xxe SYSTEM "http://abc123.oast.pro/">`）
+  1. `start`: 启动 interactsh-client，获取一个唯一交互域名（如 abc123.oast.pro），保存状态后退出
+  2. 在 payload 中使用此域名（如 `<!ENTITY xxe SYSTEM "http://abc123.oast.pro/">`）
   3. 目标解析 payload 后向 interactsh-server 发起 DNS/HTTP/SMTP/LDAP 请求
-  4. 本工具轮询 interactsh-server，捕获并返回交互记录
-
-  ## 使用流程
-  1. 先调用本工具启动监听，获得交互域名
-  2. 构造 payload，使用该域名作为回调地址
-  3. 发送 payload 到目标
-  4. 再次调用本工具（传入 correlation_id）查看是否收到交互回调
+  4. `poll`: 重连 interactsh-server，检查是否有交互回调
   5. 有回调 = 漏洞确认
 
-  ## 输出说明
-  返回 JSON，包含：
-  - `interaction_domain`: 唯一交互域名（用于构造 payload）
-  - `correlation_id`: 关联ID（用于查询交互记录）
-  - `interactions`: 交互记录列表（DNS查询、HTTP请求等）
+  ## 使用流程
+  ```
+  # 步骤1: 启动监听
+  interactsh start
+  # 返回: {"status":"started", "interaction_domain":"abc123.oast.pro", ...}
+
+  # 步骤2: 构造payload并发送到目标
+  curl "http://target.com/page?url=http://abc123.oast.pro/test"
+
+  # 步骤3: 等待5-10秒后检查回调
+  interactsh poll
+  # 返回: {"status":"polled", "has_callback":true, "interactions":[...], ...}
+  ```
 
   ## 注意事项
-  - 首次运行需要 interactsh-client 已安装（`go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest`）
-  - 默认使用 oast.pro 公共服务器；网络不通时可尝试 `-server oast.live`
-  - 交互记录可能有几秒延迟，建议 payload 发送后等待 5-10 秒再查询
+  - 需要 interactsh-client 已安装（`go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest`）
+  - 默认使用 oast.pro 公共服务器；网络不通时可指定其他服务器
+  - 交互记录可能有几秒延迟，建议 payload 发送后等待 5-10 秒再 poll
+  - state 文件保存在 CYBERSTRIKE_WORKSPACE 或 /tmp/.interactsh_state.json
 
 parameters:
   - name: "action"
     type: "string"
     description: |
       操作模式：
-      - `start`: 启动新的 OOB 监听器，返回交互域名和 correlation_id
-      - `poll`: 查询已有监听器的交互记录（需传入 correlation_id）
+      - `start`: 启动新的 OOB 监听，返回唯一交互域名（运行约5-15秒获取域名后自动退出）
+      - `poll`: 检查是否有交互回调（自动读取 start 保存的状态，或手动传入 correlation_id）
     required: true
     position: 0
+    format: "positional"
+  - name: "server"
+    type: "string"
+    description: |
+      OOB 服务器地址（可选，默认 oast.pro）。
+      备选: oast.live, oast.site, oast.me, oast.fun
+    required: false
+    position: 1
     format: "positional"
   - name: "correlation_id"
     type: "string"
     description: |
-      关联ID（仅 action=poll 时使用）。
-      start 模式返回的 correlation_id，用于查询对应的交互记录。
+      关联ID（仅 action=poll 时可选）。
+      不传则自动从上次 start 的状态文件中读取。
     required: false
-    flag: "-id"
-    format: "flag"
-  - name: "server"
-    type: "string"
-    description: |
-      OOB 服务器地址（可选）。
-      默认: oast.pro（ProjectDiscovery 公共服务器）。
-      备选: oast.live, oast.site, oast.me, oast.fun
-      自建: 传入自建服务器URL。
-    required: false
-    flag: "-server"
-    format: "flag"
-  - name: "additional_args"
-    type: "string"
-    description: "额外参数，如 -v 详细输出"
-    required: false
+    position: 2
     format: "positional"
