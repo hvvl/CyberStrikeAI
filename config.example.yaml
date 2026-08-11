@@ -367,6 +367,10 @@ c2:
 # ============================================
 knowledge:
   enabled: false # 是否启用知识检索功能
+  # ⚠️ 渗透实战建议关闭知识库RAG，改用 search_exploit 工具实时搜索exploit。
+  # 原因：RAG检索基于语义相似度，在渗透场景中检索质量不理想，且容易干扰Agent判断。
+  # 替代方案：使用 search_exploit 工具从GitHub/Exploit-DB实时搜索，更精确更可靠。
+  # 如需启用RAG，配置下方的embedding/retrieval参数。
   base_path: knowledge_base # 知识库目录路径（相对于配置文件所在目录）
   embedding:
     provider: openai # 嵌入模型提供商（目前仅支持openai）
