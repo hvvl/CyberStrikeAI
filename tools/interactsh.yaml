@@ -1,0 +1,73 @@
+name: "interactsh"
+command: "interactsh-client"
+enabled: true
+short_description: "OOB带外检测：启动interactsh获取唯一交互域名，用于blind XXE/SSRF/SQLi/RCE验证"
+description: |
+  Interactsh OOB（Out-of-Band）带外交互检测工具。
+
+  ## 核心用途
+  用于验证无回显的盲注型漏洞：
+  - Blind XXE（XML外部实体注入）
+  - Blind SSRF（服务端请求伪造）
+  - Blind SQL Injection（DNS外带）
+  - Blind 命令注入（HTTP/DNS回调）
+  - Blind 反序列化
+  - Blind 文件包含
+
+  ## 工作原理
+  1. interactsh-client 连接 interactsh-server，获取一个唯一子域名（如 abc123.oast.pro）
+  2. 在 payload 中使用此子域名（如 `<!ENTITY xxe SYSTEM "http://abc123.oast.pro/">`）
+  3. 目标解析 payload 后向 interactsh-server 发起 DNS/HTTP/SMTP/LDAP 请求
+  4. 本工具轮询 interactsh-server，捕获并返回交互记录
+
+  ## 使用流程
+  1. 先调用本工具启动监听，获得交互域名
+  2. 构造 payload，使用该域名作为回调地址
+  3. 发送 payload 到目标
+  4. 再次调用本工具（传入 correlation_id）查看是否收到交互回调
+  5. 有回调 = 漏洞确认
+
+  ## 输出说明
+  返回 JSON，包含：
+  - `interaction_domain`: 唯一交互域名（用于构造 payload）
+  - `correlation_id`: 关联ID（用于查询交互记录）
+  - `interactions`: 交互记录列表（DNS查询、HTTP请求等）
+
+  ## 注意事项
+  - 首次运行需要 interactsh-client 已安装（`go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest`）
+  - 默认使用 oast.pro 公共服务器；网络不通时可尝试 `-server oast.live`
+  - 交互记录可能有几秒延迟，建议 payload 发送后等待 5-10 秒再查询
+
+parameters:
+  - name: "action"
+    type: "string"
+    description: |
+      操作模式：
+      - `start`: 启动新的 OOB 监听器，返回交互域名和 correlation_id
+      - `poll`: 查询已有监听器的交互记录（需传入 correlation_id）
+    required: true
+    position: 0
+    format: "positional"
+  - name: "correlation_id"
+    type: "string"
+    description: |
+      关联ID（仅 action=poll 时使用）。
+      start 模式返回的 correlation_id，用于查询对应的交互记录。
+    required: false
+    flag: "-id"
+    format: "flag"
+  - name: "server"
+    type: "string"
+    description: |
+      OOB 服务器地址（可选）。
+      默认: oast.pro（ProjectDiscovery 公共服务器）。
+      备选: oast.live, oast.site, oast.me, oast.fun
+      自建: 传入自建服务器URL。
+    required: false
+    flag: "-server"
+    format: "flag"
+  - name: "additional_args"
+    type: "string"
+    description: "额外参数，如 -v 详细输出"
+    required: false
+    format: "positional"
