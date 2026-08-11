@@ -1,0 +1,83 @@
+name: "ocr_captcha"
+command: "python3"
+args:
+  - "-c"
+  - |
+    import sys, json, os
+
+    def ocr(image_path):
+        """OCR recognize captcha image using ddddocr."""
+        try:
+            import ddddocr
+            ocr_instance = ddddocr.DdddOcr(show_ad=False)
+            with open(image_path, "rb") as f:
+                img_bytes = f.read()
+            result = ocr_instance.classification(img_bytes)
+            return {"status": "success", "captcha": result, "image": image_path}
+        except ImportError:
+            return {"status": "error", "message": "ddddocr not installed. Run: pip install ddddocr"}
+        except FileNotFoundError:
+            return {"status": "error", "message": f"Image not found: {image_path}"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def download_and_ocr(url, headers=None):
+        """Download captcha image from URL and OCR it."""
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, headers=headers or {"User-Agent": "Mozilla/5.0"})
+            img_bytes = urllib.request.urlopen(req, timeout=15).read()
+            # Save to temp
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                f.write(img_bytes)
+                tmp_path = f.name
+            return ocr(tmp_path)
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    if len(sys.argv) < 2:
+        print(json.dumps({"error": "Usage: ocr_captcha <image_path_or_url>"}, ensure_ascii=False))
+        sys.exit(1)
+
+    target = sys.argv[1]
+    if target.startswith("http://") or target.startswith("https://"):
+        result = download_and_ocr(target)
+    else:
+        result = ocr(target)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+enabled: true
+short_description: "验证码OCR识别：支持本地图片或URL，自动识别数字字母验证码"
+description: |
+  验证码 OCR 自动识别工具（基于 ddddocr）。
+
+  ## 核心用途
+  自动识别简单的数字+字母验证码（4-6位），用于：
+  - 登录页面验证码自动绕过
+  - 注册/找回密码页面验证码
+  - API 接口验证码校验
+
+  ## 能力范围
+  - ✅ 数字+字母验证码（4-6位）：准确率 90%+
+  - ✅ 纯数字验证码：准确率 95%+
+  - ❌ 滑块验证码、点选验证码、行为验证码（需人工处理）
+  - ❌ 算术验证码（如 3+5=?）
+
+  ## 使用方式
+  支持两种输入：
+  1. 本地图片路径: ocr_captcha /tmp/captcha.png
+  2. 验证码图片URL: ocr_captcha http://target.com/captcha.jpg
+
+  ## 依赖
+  需要 ddddocr: `pip install ddddocr`
+
+parameters:
+  - name: "image"
+    type: "string"
+    description: |
+      验证码图片路径或URL。
+      - 本地路径: /tmp/captcha.png
+      - HTTP URL: http://target.com/captcha.jpg
+    required: true
+    position: 0
+    format: "positional"
