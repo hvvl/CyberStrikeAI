@@ -21,9 +21,11 @@ import (
 	"go.uber.org/zap"
 )
 
-// channelFailoverState 跟踪一次请求内已尝试过的通道，防止 fallback 链成环。
+// channelFailoverState 跟踪一次请求内已尝试过的通道，防止 fallback 链成环，
+// 并用 switched 保证整次请求最多跨通道降级一次（与文档承诺一致）。
 type channelFailoverState struct {
-	visited map[string]struct{}
+	visited  map[string]struct{}
+	switched bool
 }
 
 func newChannelFailoverState(initialChannelID string) *channelFailoverState {
@@ -52,6 +54,11 @@ func (h *AgentHandler) tryChannelFailover(
 		return false
 	}
 	cur := *runCfg
+
+	// 最多跨通道降级一次：已切换过则不再继续降级（防环之外的数量上限）。
+	if state != nil && state.switched {
+		return false
+	}
 
 	fallback := strings.TrimSpace(cur.OpenAI.FallbackChannel)
 	if fallback == "" {
@@ -90,6 +97,9 @@ func (h *AgentHandler) tryChannelFailover(
 
 	fromChannel := cur.AI.DefaultChannel
 	*runCfg = newCfg
+	if state != nil {
+		state.switched = true
+	}
 	if notify != nil {
 		notify("channel_failover",
 			"通道 "+fromChannel+" 重试已用尽，自动切换到备用通道 "+resolvedID+" 继续执行…",

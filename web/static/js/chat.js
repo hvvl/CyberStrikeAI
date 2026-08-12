@@ -11269,16 +11269,16 @@ function renderContinueFailedList() {
         const title = safeTruncateText(item.title || _cfT('continueFailedModal.untitled', '未命名会话'), 60);
         const preview = item.errorPreview || '';
         const failedAt = formatFailedAt(item.failedAt);
-        // 用 JSON.stringify 生成 JS 字符串字面量，避免依赖 escapeHtml 转义引号
-        const idLiteral = JSON.stringify(String(item.conversationId || ''));
-        return '<div class="batch-conversation-row" data-continue-failed-row="' + escapeHtml(item.conversationId) + '">'
+        // 转义双引号用于 data- 属性；onclick 用 this.dataset 取，避免把 id 拼进 JS 字符串字面量导致引号提前闭合属性。
+        const idAttr = escapeHtml(String(item.conversationId || '')).replace(/"/g, '&quot;');
+        return '<div class="batch-conversation-row" data-continue-failed-row="' + idAttr + '">'
             + '<div class="batch-table-col-name">'
             + '<div>' + escapeHtml(title) + '</div>'
             + (preview ? '<span class="continue-failed-error-preview" title="' + escapeHtml(preview) + '">' + escapeHtml(preview) + '</span>' : '')
             + '</div>'
             + '<div class="batch-table-col-time continue-failed-time">' + escapeHtml(failedAt) + '</div>'
             + '<div class="batch-table-col-action">'
-            + '<button type="button" class="continue-failed-row-btn" onclick="continueSingleFailedConversation(' + idLiteral + ')">'
+            + '<button type="button" class="continue-failed-row-btn" data-conversation-id="' + idAttr + '" onclick="continueSingleFailedConversation(this.dataset.conversationId)">'
             + escapeHtml(_cfT('continueFailedModal.continueOne', '继续'))
             + '</button>'
             + '</div>'

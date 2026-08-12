@@ -313,7 +313,7 @@ type MultiAgentEinoMiddlewareConfig struct {
 	DeepOutputKey string `yaml:"deep_output_key,omitempty" json:"deep_output_key,omitempty"`
 	// DeepModelRetryMaxRetries 已废弃：临时错误统一由 run loop 内 isEinoTransientRunError + run_retry_max_attempts 处理。
 	DeepModelRetryMaxRetries int `yaml:"deep_model_retry_max_retries,omitempty" json:"deep_model_retry_max_retries,omitempty"`
-	// RunRetryMaxAttempts > 0：408/409/425/429/5xx/网络抖动时可退避重试次数（run loop 与 summarization 共用）；0=默认 4。
+	// RunRetryMaxAttempts > 0：408/409/425/429/5xx/网络抖动时可退避重试次数（run loop 与 summarization 共用）；0=默认 6。
 	RunRetryMaxAttempts int `yaml:"run_retry_max_attempts,omitempty" json:"run_retry_max_attempts,omitempty"`
 	// RunRetryMaxBackoffSec 单次退避上限秒数；0=默认 30。
 	RunRetryMaxBackoffSec int `yaml:"run_retry_max_backoff_sec,omitempty" json:"run_retry_max_backoff_sec,omitempty"`

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -37,18 +38,21 @@ func (h *AgentHandler) ListAPIFailedConversations(limit int) ([]*FailedConversat
 	if h.db == nil {
 		return nil, fmt.Errorf("数据库未初始化")
 	}
-	if limit <= 0 || limit > 200 {
-		limit = 100
-	}
-	const q = `
+	// limit <= 0 表示不限制（用于"继续全部"）；limit > 0 时按条数截断。
+	base := `
 SELECT c.id, c.title, c.agent_mode, pd.message, pd.created_at
 FROM conversations c
 JOIN process_details pd ON pd.conversation_id = c.id
 WHERE pd.event_type = 'error'
   AND pd.rowid = (SELECT MAX(pd2.rowid) FROM process_details pd2 WHERE pd2.conversation_id = c.id)
-ORDER BY pd.created_at DESC
-LIMIT ?`
-	rows, err := h.db.Query(q, limit)
+ORDER BY pd.created_at DESC`
+	var rows *sql.Rows
+	var err error
+	if limit > 0 {
+		rows, err = h.db.Query(base+` LIMIT ?`, limit)
+	} else {
+		rows, err = h.db.Query(base)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -63,8 +67,68 @@ LIMIT ?`
 			continue
 		}
 		it.FailedAt = parseFlexibleTime(createdAt)
-		if len(it.ErrorPreview) > 300 {
-			it.ErrorPreview = it.ErrorPreview[:300] + "…"
+		// 按 rune 截断，避免在 300 字节边界切断多字节 UTF-8 字符（中文错误消息）。
+		if r := []rune(it.ErrorPreview); len(r) > 300 {
+			it.ErrorPreview = string(r[:300]) + "…"
+		}
+		items = append(items, &it)
+	}
+	return items, rows.Err()
+}
+
+// ListAPIFailedConversationsByIDs 按显式会话 ID 查询失败会话（不受最近 N 条上限约束）。
+// 仅返回「最近一次过程事件为 error」的会话；传入不存在或非失败的 ID 自然不出现在结果里，
+// 由调用方据此在 skipped 中给出明确原因。
+func (h *AgentHandler) ListAPIFailedConversationsByIDs(ids []string) ([]*FailedConversationItem, error) {
+	if h.db == nil {
+		return nil, fmt.Errorf("数据库未初始化")
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, 0, len(ids))
+	args := make([]interface{}, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	if len(placeholders) == 0 {
+		return nil, nil
+	}
+	q := `
+SELECT c.id, c.title, c.agent_mode, pd.message, pd.created_at
+FROM conversations c
+JOIN process_details pd ON pd.conversation_id = c.id
+WHERE pd.event_type = 'error'
+  AND pd.rowid = (SELECT MAX(pd2.rowid) FROM process_details pd2 WHERE pd2.conversation_id = c.id)
+  AND c.id IN (` + strings.Join(placeholders, ",") + `)
+ORDER BY pd.created_at DESC`
+	rows, err := h.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]*FailedConversationItem, 0, len(placeholders))
+	for rows.Next() {
+		var it FailedConversationItem
+		var createdAt string
+		if err := rows.Scan(&it.ConversationID, &it.Title, &it.AgentMode, &it.ErrorPreview, &createdAt); err != nil {
+			h.logger.Warn("扫描失败会话行失败", zap.Error(err))
+			continue
+		}
+		it.FailedAt = parseFlexibleTime(createdAt)
+		if r := []rune(it.ErrorPreview); len(r) > 300 {
+			it.ErrorPreview = string(r[:300]) + "…"
 		}
 		items = append(items, &it)
 	}
@@ -127,7 +191,15 @@ func (h *AgentHandler) ContinueFailedConversations(c *gin.Context) {
 	var req ContinueFailedConversationsRequest
 	_ = c.ShouldBindJSON(&req) // 允许空 body（= 继续全部）
 
-	candidates, err := h.ListAPIFailedConversations(200)
+	var candidates []*FailedConversationItem
+	var err error
+	if len(req.ConversationIDs) > 0 {
+		// 显式 ID：不受列表上限约束，逐一判定（含不存在/未失败的明确原因）。
+		candidates, err = h.ListAPIFailedConversationsByIDs(req.ConversationIDs)
+	} else {
+		// 空 body = 全部失败会话（不限最近 N 条）。
+		candidates, err = h.ListAPIFailedConversations(0)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -170,6 +242,22 @@ func (h *AgentHandler) ContinueFailedConversations(c *gin.Context) {
 		st.queued[it.ConversationID] = true
 		st.queue = append(st.queue, it.ConversationID)
 		queued = append(queued, it.ConversationID)
+	}
+
+	// 显式 ID 请求时，对「不在失败会话候选里」的 ID 给出明确原因（不存在/未处于失败状态），
+	// 避免客户端看到 queued=0 却不知原因。
+	if len(req.ConversationIDs) > 0 {
+		found := make(map[string]bool, len(candidates))
+		for _, it := range candidates {
+			found[it.ConversationID] = true
+		}
+		for _, id := range req.ConversationIDs {
+			id = strings.TrimSpace(id)
+			if id == "" || found[id] {
+				continue
+			}
+			skipped = append(skipped, skippedItem{id, "会话不存在或当前不处于失败状态"})
+		}
 	}
 
 	if len(queued) > 0 && !st.running {
@@ -237,16 +325,6 @@ func (h *AgentHandler) continueFailedConversation(conversationID string) {
 	}
 	principal := authctx.NewPrincipalWithScopes(access.User.ID, access.User.Username, access.Scope, access.Permissions, access.PermissionScopes)
 
-	assistantMsg, err := h.db.AddMessage(conversationID, "assistant", "处理中...", nil)
-	if err != nil {
-		log.Error("续跑失败会话：创建助手消息失败", zap.Error(err))
-		return
-	}
-	assistantMessageID := ""
-	if assistantMsg != nil {
-		assistantMessageID = assistantMsg.ID
-	}
-
 	// 历史优先取 model-facing 轨迹（失败时已 persistEinoAgentTraceForResume 保留），否则退化为消息文本历史。
 	history, herr := h.loadHistoryFromAgentTrace(conversationID)
 	if herr != nil || len(history) == 0 {
@@ -286,6 +364,18 @@ func (h *AgentHandler) continueFailedConversation(conversationID string) {
 	registered = true
 	h.tasks.UpdateTaskStatus(conversationID, "running")
 
+	// 先抢占任务成功再写"处理中"占位消息：避免 StartTask 与正常聊天请求竞争同一会话时
+	// 留下孤立的 assistant 占位消息（M6 竞态修复）。
+	assistantMsg, err := h.db.AddMessage(conversationID, "assistant", "处理中...", nil)
+	if err != nil {
+		log.Error("续跑失败会话：创建助手消息失败", zap.Error(err))
+		return
+	}
+	assistantMessageID := ""
+	if assistantMsg != nil {
+		assistantMessageID = assistantMsg.ID
+	}
+
 	h.publishContinueFailedEvent(conversationID, "continue_failed_start",
 		"检测到上一次执行因 API 调用失败，正在自动继续…",
 		map[string]interface{}{"conversationId": conversationID, "messageId": assistantMessageID})
@@ -297,7 +387,7 @@ func (h *AgentHandler) continueFailedConversation(conversationID string) {
 	taskCtx = mcp.WithToolRunRegistry(taskCtx, h.tasks)
 	taskCtx = mcp.WithEinoExecuteRunRegistry(taskCtx, h.tasks)
 
-	// 按会话的 agent_mode 选择执行器；通道走默认路由（若再次重试耗尽，handler 层 failover 自动接管）。
+	// 按会话的 agent_mode 选择执行器；通道走默认路由，重试耗尽时经 tryChannelFailover 分段续跑。
 	mode := strings.TrimSpace(strings.ToLower(conv.AgentMode))
 	useMulti := h.config.MultiAgent.Enabled && mode != "" && mode != "eino_single"
 	orch := "deep"
@@ -305,22 +395,42 @@ func (h *AgentHandler) continueFailedConversation(conversationID string) {
 		orch = config.NormalizeMultiAgentOrchestration(mode)
 	}
 
+	// 后台续跑与普通聊天入口一致：重试耗尽 → fallback_channel 分段续跑（复用同一套 failover 循环）。
+	runCfg, _, cfgErr := h.configForAIChannel("")
+	if cfgErr != nil {
+		log.Warn("续跑失败会话：解析通道配置失败", zap.Error(cfgErr))
+		runCfg = h.config
+	}
+	failover := newChannelFailoverState(runCfg.AI.DefaultChannel)
+	curHistory := history
+
 	var result *multiagent.RunResult
 	var runErr error
-	if useMulti {
-		result, runErr = multiagent.RunDeepAgent(taskCtx, h.config, &h.config.MultiAgent, h.agent, h.db, h.logger,
-			conversationID, h.conversationProjectID(conversationID), continueFailedContinuePrompt, history, roleTools,
-			progressCallback, h.agentsMarkdownDir, orch, nil, h.agentSessionContextBlock(conversationID))
-	} else {
-		result, runErr = multiagent.RunEinoSingleChatModelAgent(taskCtx, h.config, &h.config.MultiAgent, h.agent, h.db, h.logger,
-			conversationID, h.conversationProjectID(conversationID), continueFailedContinuePrompt, history, roleTools,
-			progressCallback, nil, h.agentSessionContextBlock(conversationID))
-	}
-
-	if runErr != nil {
+	for {
+		if useMulti {
+			result, runErr = multiagent.RunDeepAgent(taskCtx, runCfg, &runCfg.MultiAgent, h.agent, h.db, h.logger,
+				conversationID, h.conversationProjectID(conversationID), continueFailedContinuePrompt, curHistory, roleTools,
+				progressCallback, h.agentsMarkdownDir, orch, nil, h.agentSessionContextBlock(conversationID))
+		} else {
+			result, runErr = multiagent.RunEinoSingleChatModelAgent(taskCtx, runCfg, &runCfg.MultiAgent, h.agent, h.db, h.logger,
+				conversationID, h.conversationProjectID(conversationID), continueFailedContinuePrompt, curHistory, roleTools,
+				progressCallback, nil, h.agentSessionContextBlock(conversationID))
+		}
+		if runErr == nil {
+			break
+		}
 		if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {
 			h.persistEinoAgentTraceForResume(conversationID, result)
 		}
+		if h.tryChannelFailover(runErr, &runCfg, failover, conversationID, &curHistory, func(eventType, message string, data interface{}) {
+			h.publishContinueFailedEvent(conversationID, eventType, message, data)
+		}) {
+			continue
+		}
+		break
+	}
+
+	if runErr != nil {
 		finishStatus = "failed"
 		errMsg := "执行失败: " + runErr.Error()
 		if assistantMessageID != "" {

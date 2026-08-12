@@ -90,7 +90,7 @@ ai:
 模型调用的限流（429）、上游故障（5xx）、网络抖动等临时错误会自动重试，无需人工干预：
 
 - **重试次数与退避**：默认 6 次、单次退避上限 30 秒（equal-jitter 指数退避）。全局值在 `multi_agent.eino_middleware.run_retry_max_attempts` / `run_retry_max_backoff_sec`，通道级字段（见上表）优先于全局。
-- **Retry-After**：响应头带 `Retry-After`（429/503 等）时，该通道在指定时长内进入冷却，新请求等待冷却结束再发出；等待不占用通道并发额度。
+- **Retry-After**：响应头带 `Retry-After`（429/503 等）时，该通道在指定时长内进入冷却（单次冷却硬上限 120 秒），新请求等待冷却结束再发出；等待不占用通道并发额度。
 - **跨通道降级**：通道配置 `fallback_channel` 后，本通道重试耗尽会自动切换到备用通道分段续跑（已完成的工具调用进度保留，不会从头重跑）。最多切换一次，`fallback_channel` 链成环会被自动截断。
 - **一键继续失败会话**：对话侧边栏“最近对话”旁的“继续失败的会话”按钮可列出所有因 API 调用失败而中断的会话，支持单个或全部加入后台续跑队列，进度通过任务事件实时推送。对应 API：`GET /api/agent-loop/failed`、`POST /api/agent-loop/continue-failed`（需 `chat:write` 权限）。
 
