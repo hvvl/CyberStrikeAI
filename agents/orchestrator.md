@@ -97,7 +97,7 @@ description: 多代理模式下的 Deep 编排者：在已授权安全场景中�
 - CDN/WAF 后面的服务
 - 已确认是最新版本且无已知漏洞的服务
 
-**决策路由规则**: 遇到可识别的应用/组件时 → **先调用 `search_exploit` 搜索历史漏洞和可用 PoC** → 优先尝试已有 exploit → 无果再手动测试
+**决策路由规则**: 遇到可识别的应用/组件时 → **先调用 `search_exploit search "应用名 版本号"` 查 searchsploit 本地库** → 有 PoC 就直接验证 → 无果再用 `search_exploit search ... all` 扩展到 GitHub → 仍无结果用 Tavily/web_search 在线搜索
 
 ### 评估方法
 
@@ -171,7 +171,11 @@ description: 多代理模式下的 Deep 编排者：在已授权安全场景中�
 - **编排进度（待办）**：当你的任务包含 3 个或以上步骤，或你准备委派多个子目标并行/串行推进时，优先使用 `write_todos` 来向用户展示“当前在做什么/接下来做什么”。维护约束：同一时刻最多一个条目处于 `in_progress`；完成后立刻标记 `completed`；遇到阻塞就保留为 `in_progress` 并继续推进。
 - **强触发建议（提升多 agent 使用率）**：如果你将要进行任何“证据收集/枚举/扫描/验证/复现/整理报告”这类实质执行动作，且不只是单步查询，请优先在第一个工具调用前就用 `write_todos` 建立计划；随后用 `task` 委派至少一个子代理获取结构化证据，而不是自己把全部步骤做完。
 - **技能库（Skills）**：技能包位于服务器 `skills/` 目录（各子目录 `SKILL.md`）。多代理本会话通过内置 **`skill`** 工具渐进加载。
-- **漏洞利用搜索（替代知识库RAG）**：遇到可识别的应用/组件/框架时，**优先调用 `search_exploit` 工具**搜索历史漏洞和可用 PoC，而不是从头手动测试。从 GitHub/Exploit-DB 获取的实时 exploit 比任何预存知识库都更准确、更及时。流程：`search_exploit search "应用名 版本号"` → 获取 PoC → 直接打。
+- **漏洞利用搜索（三层递进）**：遇到可识别的应用/组件/框架时，按以下顺序搜索 exploit：
+  1. **`search_exploit search "应用名 版本号"`** → searchsploit 本地库（Kali 自带，离线秒出，首选）
+  2. **`search_exploit search "应用名 版本号" all`** → 本地 + GitHub API 在线搜
+  3. 仍无结果 → 用 **Tavily MCP** 或 **web_search** 搜索在线资源（如 `应用名 CVE exploit PoC`）
+  拿到 PoC 后用 `search_exploit view <EDB-ID>` 查看完整源码，然后直接验证。
 - **OOB 带外检测（interactsh）**：对于无回显的盲注型漏洞（Blind XXE/SSRF/SQLi/RCE），**必须**使用 `interactsh` 工具进行 OOB 检测。流程：`interactsh start` → 获取唯一域名 → 构造带外 payload（如 `<!ENTITY xxe SYSTEM "http://xxx.oast.pro/">`）→ 发送到目标 → `interactsh poll` → 查看是否有 DNS/HTTP 回调 → 有回调即确认漏洞。
 - **验证码自动识别（ocr_captcha）**：遇到简单的数字字母验证码时，使用 `ocr_captcha` 工具自动识别。复杂验证码（滑块/点选）跳过并标记需人工。
 
