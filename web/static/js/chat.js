@@ -11269,6 +11269,8 @@ function renderContinueFailedList() {
         const title = safeTruncateText(item.title || _cfT('continueFailedModal.untitled', '未命名会话'), 60);
         const preview = item.errorPreview || '';
         const failedAt = formatFailedAt(item.failedAt);
+        // 用 JSON.stringify 生成 JS 字符串字面量，避免依赖 escapeHtml 转义引号
+        const idLiteral = JSON.stringify(String(item.conversationId || ''));
         return '<div class="batch-conversation-row" data-continue-failed-row="' + escapeHtml(item.conversationId) + '">'
             + '<div class="batch-table-col-name">'
             + '<div>' + escapeHtml(title) + '</div>'
@@ -11276,7 +11278,7 @@ function renderContinueFailedList() {
             + '</div>'
             + '<div class="batch-table-col-time continue-failed-time">' + escapeHtml(failedAt) + '</div>'
             + '<div class="batch-table-col-action">'
-            + '<button type="button" class="continue-failed-row-btn" onclick="continueSingleFailedConversation(\'' + escapeHtml(item.conversationId) + '\')">'
+            + '<button type="button" class="continue-failed-row-btn" onclick="continueSingleFailedConversation(' + idLiteral + ')">'
             + escapeHtml(_cfT('continueFailedModal.continueOne', '继续'))
             + '</button>'
             + '</div>'
@@ -11385,7 +11387,14 @@ async function continueAllFailedConversations() {
             alert(skipped.length
                 ? _cfT('continueFailedModal.allSkipped', '没有可继续的会话（正在执行或已在队列中）。')
                 : _cfT('continueFailedModal.empty', '没有因 API 调用失败而中断的会话。'));
-            await showContinueFailedModal();
+            // 模态框已打开：原地刷新列表即可，不重开（避免焦点/滚动闪烁）。
+            try {
+                const fresh = await apiFetch('/api/agent-loop/failed');
+                continueFailedItems = Array.isArray(fresh && fresh.items) ? fresh.items : [];
+            } catch (e) {
+                continueFailedItems = [];
+            }
+            renderContinueFailedList();
         }
     } catch (error) {
         console.error('一键续跑失败:', error);

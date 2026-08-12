@@ -2542,6 +2542,9 @@ function readAIChannelFromMainForm(id) {
         max_total_tokens: parseInt(document.getElementById('openai-max-total-tokens')?.value, 10) || 120000,
         max_completion_tokens: maxCompletionTokens,
         max_concurrency: Math.max(0, parseInt(document.getElementById('openai-max-concurrency')?.value, 10) || 0),
+        run_retry_max_attempts: Math.max(0, parseInt(document.getElementById('openai-run-retry-max-attempts')?.value, 10) || 0),
+        run_retry_max_backoff_sec: Math.max(0, parseInt(document.getElementById('openai-run-retry-max-backoff-sec')?.value, 10) || 0),
+        fallback_channel: (document.getElementById('openai-fallback-channel')?.value || '').trim(),
         reasoning: {
             ...(prev.reasoning || {}),
             mode: document.getElementById('openai-reasoning-mode')?.value || 'auto',
@@ -2575,6 +2578,12 @@ function writeAIChannelToMainForm(id) {
     if (maxCompletionTokensEl) maxCompletionTokensEl.value = ch.max_completion_tokens || 32768;
     const maxConcurrencyEl = document.getElementById('openai-max-concurrency');
     if (maxConcurrencyEl) maxConcurrencyEl.value = typeof ch.max_concurrency === 'number' ? ch.max_concurrency : (parseInt(ch.max_concurrency, 10) || 0);
+    const runRetryAttemptsEl = document.getElementById('openai-run-retry-max-attempts');
+    if (runRetryAttemptsEl) runRetryAttemptsEl.value = typeof ch.run_retry_max_attempts === 'number' ? ch.run_retry_max_attempts : (parseInt(ch.run_retry_max_attempts, 10) || 0);
+    const runRetryBackoffEl = document.getElementById('openai-run-retry-max-backoff-sec');
+    if (runRetryBackoffEl) runRetryBackoffEl.value = typeof ch.run_retry_max_backoff_sec === 'number' ? ch.run_retry_max_backoff_sec : (parseInt(ch.run_retry_max_backoff_sec, 10) || 0);
+    const fallbackEl = document.getElementById('openai-fallback-channel');
+    if (fallbackEl) fallbackEl.value = ch.fallback_channel || '';
     const r = ch.reasoning || {};
     const modeEl = document.getElementById('openai-reasoning-mode');
     if (modeEl) modeEl.value = ['auto', 'on', 'off'].includes(String(r.mode || '').toLowerCase()) ? String(r.mode).toLowerCase() : 'auto';

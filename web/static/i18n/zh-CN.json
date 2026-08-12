@@ -2817,7 +2817,14 @@
     "testErrorModelUnavailable": "模型不可用或模型名不正确，请检查模型名称",
     "testErrorBaseUrl": "Base URL 不可用，请检查地址是否正确",
     "maxConcurrency": "最大并发数",
-    "maxConcurrencyHint": "该通道同时进行的模型请求上限（HTTP 层信号量，覆盖流式）；0=不限制。避免撞服务商 plan 并发限制。"
+    "maxConcurrencyHint": "该通道同时进行的模型请求上限（HTTP 层信号量，覆盖流式）；0=不限制。避免撞服务商 plan 并发限制。",
+    "runRetryMaxAttempts": "临时错误重试次数",
+    "runRetryMaxAttemptsHint": "限流/5xx/网络抖动等临时错误的重试次数（指数退避）；0=沿用全局配置，默认 6。",
+    "runRetryMaxBackoffSec": "重试最大退避(秒)",
+    "runRetryMaxBackoffSecHint": "单次退避上限（含抖动）；0=沿用全局配置，默认 30 秒。",
+    "fallbackChannel": "降级通道",
+    "fallbackChannelPlaceholder": "留空=不降级",
+    "fallbackChannelHint": "本通道重试耗尽后自动切换的备用通道 ID（分段续跑，最多一次）；留空=不降级。"
   },
   "settingsTerminal": {
     "title": "终端",
@@ -3223,6 +3230,7 @@
     "loadFailed": "加载失败会话列表出错",
     "untitled": "未命名会话",
     "failedAt": "失败时间",
+    "continueAll": "全部继续",
     "continueOne": "继续",
     "continuing": "续跑中",
     "queuedOne": "已加入后台续跑队列，可打开该会话查看进度。",

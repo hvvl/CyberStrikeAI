@@ -69,6 +69,10 @@ ai:
 | `base_url/api_key/model` | 必填。Base URL 通常需要包含版本路径，如 OpenAI/兼容网关的 `/v1`。 |
 | `max_total_tokens` | 上下文压缩、攻击链构建、多代理摘要等共用的总预算。 |
 | `max_completion_tokens` | 单次模型输出上限；未填时使用默认值。 |
+| `max_concurrency` | 该通道同时进行的模型请求上限（HTTP 层信号量，覆盖流式全程）；0=不限制。用于适配 token plan / agent plan 的并发额度，超出的请求排队等待。 |
+| `run_retry_max_attempts` | 通道级临时错误（限流/5xx/网络抖动）重试次数，指数退避；0=沿用全局 `multi_agent.eino_middleware.run_retry_max_attempts`，全局未设时默认 6。 |
+| `run_retry_max_backoff_sec` | 通道级单次退避上限（含抖动）；0=沿用全局配置，全局未设时默认 30 秒。 |
+| `fallback_channel` | 本通道重试耗尽后自动切换的备用通道 ID。跨通道降级采用分段续跑（保留已完成进度，最多切换一次，防环）；留空=不降级。 |
 | `reasoning` | 该通道的默认推理扩展字段。不同网关支持差异较大，异常时先尝试 `mode: off`。 |
 
 对话页的“AI 通道”下拉框会读取已保存通道。请求体中的 `aiChannelId` 非空时仅对本次/本会话运行配置生效，不会把 API Key 发送给模型；为空时跟随 `ai.default_channel`。
@@ -80,6 +84,15 @@ ai:
 - 复制：以当前表单内容创建副本，适合为同一服务商配置不同模型。
 - 删除：默认通道不能作为批量删除目标；删除后需保留至少一个通道。
 - 探活：单通道“测试连接”或左侧“批量探活”会调用模型测试接口，适合验证 Key、Base URL 和模型名。
+
+### 临时错误重试与跨通道降级
+
+模型调用的限流（429）、上游故障（5xx）、网络抖动等临时错误会自动重试，无需人工干预：
+
+- **重试次数与退避**：默认 6 次、单次退避上限 30 秒（equal-jitter 指数退避）。全局值在 `multi_agent.eino_middleware.run_retry_max_attempts` / `run_retry_max_backoff_sec`，通道级字段（见上表）优先于全局。
+- **Retry-After**：响应头带 `Retry-After`（429/503 等）时，该通道在指定时长内进入冷却，新请求等待冷却结束再发出；等待不占用通道并发额度。
+- **跨通道降级**：通道配置 `fallback_channel` 后，本通道重试耗尽会自动切换到备用通道分段续跑（已完成的工具调用进度保留，不会从头重跑）。最多切换一次，`fallback_channel` 链成环会被自动截断。
+- **一键继续失败会话**：对话侧边栏“最近对话”旁的“继续失败的会话”按钮可列出所有因 API 调用失败而中断的会话，支持单个或全部加入后台续跑队列，进度通过任务事件实时推送。对应 API：`GET /api/agent-loop/failed`、`POST /api/agent-loop/continue-failed`（需 `chat:write` 权限）。
 
 ## Agent
 

@@ -3560,6 +3560,21 @@
                                                                 <input type="number" id="openai-max-concurrency" placeholder="4" min="0" step="1" />
                                                                 <small class="form-hint" data-i18n="settingsBasic.maxConcurrencyHint">该通道同时进行的模型请求上限（HTTP 层信号量，覆盖流式）；0=不限制。避免撞服务商 plan 并发限制。</small>
                                                             </div>
+                                                            <div class="form-group">
+                                                                <label for="openai-run-retry-max-attempts"><span data-i18n="settingsBasic.runRetryMaxAttempts">临时错误重试次数</span></label>
+                                                                <input type="number" id="openai-run-retry-max-attempts" placeholder="6" min="0" step="1" />
+                                                                <small class="form-hint" data-i18n="settingsBasic.runRetryMaxAttemptsHint">限流/5xx/网络抖动等临时错误的重试次数（指数退避）；0=沿用全局配置，默认 6。</small>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label for="openai-run-retry-max-backoff-sec"><span data-i18n="settingsBasic.runRetryMaxBackoffSec">重试最大退避(秒)</span></label>
+                                                                <input type="number" id="openai-run-retry-max-backoff-sec" placeholder="30" min="0" step="1" />
+                                                                <small class="form-hint" data-i18n="settingsBasic.runRetryMaxBackoffSecHint">单次退避上限（含抖动）；0=沿用全局配置，默认 30 秒。</small>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label for="openai-fallback-channel"><span data-i18n="settingsBasic.fallbackChannel">降级通道</span></label>
+                                                                <input type="text" id="openai-fallback-channel" data-i18n="settingsBasic.fallbackChannelPlaceholder" data-i18n-attr="placeholder" placeholder="留空=不降级" autocomplete="off" />
+                                                                <small class="form-hint" data-i18n="settingsBasic.fallbackChannelHint">本通道重试耗尽后自动切换的备用通道 ID（分段续跑，最多一次）；留空=不降级。</small>
+                                                            </div>
                                                         </div>
                                                     </section>
 

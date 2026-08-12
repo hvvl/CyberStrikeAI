@@ -2829,7 +2829,14 @@
     "testErrorModelUnavailable": "Model is unavailable or the model name is incorrect.",
     "testErrorBaseUrl": "Base URL is unavailable. Check that the endpoint is correct.",
     "maxConcurrency": "Max Concurrency",
-    "maxConcurrencyHint": "Max concurrent model requests for this channel (HTTP-level semaphore, covers streaming); 0 = unlimited. Prevents hitting provider plan concurrency limits."
+    "maxConcurrencyHint": "Max concurrent model requests for this channel (HTTP-level semaphore, covers streaming); 0 = unlimited. Prevents hitting provider plan concurrency limits.",
+    "runRetryMaxAttempts": "Transient retry attempts",
+    "runRetryMaxAttemptsHint": "Retry count (exponential backoff) for rate-limit/5xx/network errors; 0 = inherit global config, default 6.",
+    "runRetryMaxBackoffSec": "Max retry backoff (sec)",
+    "runRetryMaxBackoffSecHint": "Per-attempt backoff cap (with jitter); 0 = inherit global config, default 30s.",
+    "fallbackChannel": "Fallback channel",
+    "fallbackChannelPlaceholder": "empty = no failover",
+    "fallbackChannelHint": "Backup channel ID to switch to (segment-resume, at most once) after retries are exhausted; empty = no failover."
   },
   "settingsTerminal": {
     "title": "Terminal",
@@ -3235,6 +3242,7 @@
     "loadFailed": "Failed to load the list of failed conversations",
     "untitled": "Untitled conversation",
     "failedAt": "Failed at",
+    "continueAll": "Continue all",
     "continueOne": "Continue",
     "continuing": "Resuming",
     "queuedOne": "Added to the background resume queue. Open the conversation to track progress.",

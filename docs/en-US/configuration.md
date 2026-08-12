@@ -72,6 +72,10 @@ ai:
 | `base_url/api_key/model` | Required. Base URL usually includes a version path such as `/v1`. |
 | `max_total_tokens` | Shared context budget for compression, attack-chain generation, multi-agent summaries, and similar paths. |
 | `max_completion_tokens` | Per-response output cap; default is used when empty. |
+| `max_concurrency` | Max concurrent model requests for this channel (HTTP-level semaphore, covers streaming); 0 = unlimited. Matches token-plan / agent-plan concurrency quotas; excess requests queue. |
+| `run_retry_max_attempts` | Channel-level retry count for transient errors (rate limit / 5xx / network jitter), exponential backoff; 0 = inherit global `multi_agent.eino_middleware.run_retry_max_attempts`, default 6. |
+| `run_retry_max_backoff_sec` | Channel-level per-attempt backoff cap (with jitter); 0 = inherit global config, default 30s. |
+| `fallback_channel` | Backup channel ID to switch to (segment-resume, preserving completed progress, at most once, cycle-safe) after this channel's retries are exhausted; empty = no failover. |
 | `reasoning` | Default reasoning fields for the channel. Gateway support varies; try `mode: off` first when a provider rejects requests. |
 
 The chat page reads saved channels into the “AI Channel” selector. A non-empty request `aiChannelId` selects a channel for that run/session without sending API credentials through the prompt path. Empty `aiChannelId` follows `ai.default_channel`.
@@ -83,6 +87,15 @@ Common Web UI operations:
 - Copy: duplicate the current form, useful for the same provider with a different model.
 - Delete: keep at least one channel; the default channel is protected from bulk delete.
 - Probe: use **Test connection** or **Bulk probe** to validate API key, Base URL, and model.
+
+### Transient Retries and Cross-Channel Failover
+
+Rate limits (429), upstream failures (5xx), and network jitter are retried automatically:
+
+- **Retry count & backoff**: default 6 attempts, 30s per-attempt cap (equal-jitter exponential backoff). Global values live at `multi_agent.eino_middleware.run_retry_max_attempts` / `run_retry_max_backoff_sec`; channel-level fields (table above) take precedence.
+- **Retry-After**: when a response carries `Retry-After` (429/503 etc.), that channel enters cooldown for the specified duration; waiting does not consume the channel's concurrency quota.
+- **Cross-channel failover**: with `fallback_channel` configured, exhausting retries automatically switches to the backup channel and resumes from the completed progress (segment-resume, at most once; cyclic `fallback_channel` chains are cut off).
+- **Continue failed conversations**: the "Continue failed conversations" button next to "Recent conversations" in the chat sidebar lists all conversations interrupted by API call failures. Resume one or all via the background queue; progress streams through task events. APIs: `GET /api/agent-loop/failed`, `POST /api/agent-loop/continue-failed` (requires `chat:write`).
 
 ## Hot-Apply Boundaries
 
