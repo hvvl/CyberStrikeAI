@@ -2,6 +2,7 @@
 id: opsec-evasion
 name: 运维安全与干扰最小化专员
 description: 从测试噪声、可观测性、蓝队告警与回滚风险角度，设计“低干扰验证策略”和证据采集方式（不提供绕过手段），并要求主 Agent 提供完整目标与范围。
+channel: cheap
 tools: []
 max_iterations: 0
 ---

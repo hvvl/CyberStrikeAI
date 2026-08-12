@@ -499,6 +499,9 @@ type MultiAgentSubConfig struct {
 	RoleTools     []string `yaml:"role_tools" json:"role_tools"`                   // 与单 Agent 角色工具相同 key；空表示全部工具（bind_role 可补全 tools）
 	MaxIterations int      `yaml:"max_iterations" json:"max_iterations"`
 	Kind          string   `yaml:"kind,omitempty" json:"kind,omitempty"` // 仅 Markdown：kind=orchestrator 表示 Deep 主代理（与 orchestrator.md 二选一约定）
+	// Channel 该子代理使用的 AI 通道 ID（ai.channels 的 key）。
+	// 空表示跟随会话/默认通道。用于按角色分配不同档位模型（如 orchestrator 用强模型、扫描类子代理用便宜模型）。
+	Channel string `yaml:"channel,omitempty" json:"channel,omitempty"`
 }
 
 // MultiAgentPublic 返回给前端的精简信息（不含子代理指令全文）。
@@ -837,6 +840,9 @@ type OpenAIConfig struct {
 	Model               string `yaml:"model" json:"model"`
 	MaxTotalTokens      int    `yaml:"max_total_tokens,omitempty" json:"max_total_tokens,omitempty"`
 	MaxCompletionTokens int    `yaml:"max_completion_tokens,omitempty" json:"max_completion_tokens,omitempty"`
+	// MaxConcurrency 该通道允许的最大并发 LLM 请求数；0 表示不限制。
+	// 由 AIChannelConfig.MaxConcurrency 透传，用于适配 token plan / agent plan 的并发额度。
+	MaxConcurrency int `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
 	// Reasoning 控制 Eino ChatModel 的 thinking / reasoning_effort / output_config 等（Eino 单/多代理路径生效）。
 	Reasoning OpenAIReasoningConfig `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
 }
@@ -856,7 +862,10 @@ type AIChannelConfig struct {
 	Model               string                `yaml:"model" json:"model"`
 	MaxTotalTokens      int                   `yaml:"max_total_tokens,omitempty" json:"max_total_tokens,omitempty"`
 	MaxCompletionTokens int                   `yaml:"max_completion_tokens,omitempty" json:"max_completion_tokens,omitempty"`
-	Reasoning           OpenAIReasoningConfig `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
+	// MaxConcurrency 该通道允许的最大并发 LLM 请求数；0 表示不限制。
+	// 用于适配 token plan / agent plan 的并发额度（如阿里云、火山引擎），超出的请求排队等待。
+	MaxConcurrency int                   `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
+	Reasoning      OpenAIReasoningConfig `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
 }
 
 func (c AIChannelConfig) ToOpenAIConfig() OpenAIConfig {
@@ -871,6 +880,7 @@ func (c AIChannelConfig) ToOpenAIConfig() OpenAIConfig {
 		Model:               c.Model,
 		MaxTotalTokens:      c.MaxTotalTokens,
 		MaxCompletionTokens: c.MaxCompletionTokens,
+		MaxConcurrency:      c.MaxConcurrency,
 		Reasoning:           c.Reasoning,
 	}
 }
@@ -887,6 +897,7 @@ func AIChannelFromOpenAI(id, name string, oa OpenAIConfig) AIChannelConfig {
 		Model:               oa.Model,
 		MaxTotalTokens:      oa.MaxTotalTokens,
 		MaxCompletionTokens: oa.MaxCompletionTokens,
+		MaxConcurrency:      oa.MaxConcurrency,
 		Reasoning:           oa.Reasoning,
 	}
 }

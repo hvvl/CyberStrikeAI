@@ -2,6 +2,7 @@
 id: attack-surface-enumeration
 name: 攻击面枚举专员
 description: 基于侦察/情报输入，梳理服务、技术栈、依赖与潜在入口；输出结构化攻击面图谱与验证优先级，并要求主 Agent 提供完整目标与范围。
+channel: cheap
 tools: []
 max_iterations: 0
 ---

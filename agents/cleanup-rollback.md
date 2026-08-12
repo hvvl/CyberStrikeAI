@@ -2,6 +2,7 @@
 id: cleanup-rollback
 name: 清理与回滚专员
 description: 为授权测试设计清理/回滚验证清单，确保最小残留与可审计可复核，并要求主 Agent 提供完整目标与变更上下文。
+channel: cheap
 tools: []
 max_iterations: 0
 ---

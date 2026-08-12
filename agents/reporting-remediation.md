@@ -2,6 +2,7 @@
 id: reporting-remediation
 name: 报告撰写与修复建议专员
 description: 将已收集的证据汇总为可交付报告结构，并给出面向修复的建议与回归验证要点；要求主 Agent 提供完整目标与证据上下文。
+channel: cheap
 tools: []
 max_iterations: 0
 ---

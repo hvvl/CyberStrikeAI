@@ -59,23 +59,49 @@ monitor:
 # 常用模型: gpt-4, gpt-3.5-turbo, deepseek-chat, claude-3-opus 等
 # provider: 可选值 openai_compatible(默认) | claude(自动桥接到 Anthropic Claude Messages API)
 ai:
-  default_channel: qwen-max
+  # default_channel：新对话与未显式选择通道的任务使用的通道。
+  # Agent 通道路由：agents/*.md frontmatter 的 channel 字段引用下方的语义化通道 ID
+  # （strong=强模型决策 / mid=中间档 / cheap=大批量执行），真实模型、密钥与并发额度
+  # 全部由这里（或后台「AI 通道配置」界面/API）决定，Agent 不硬编码模型，后期可热改。
+  default_channel: strong
   channels:
-    qwen-max:
-      name: Qwen Max
+    # 强模型通道：orchestrator 规划、关键决策。默认也用 glm-5.2 控制成本；
+    # 需要时可在后台把 model 改为 qwen3.8-max / kimi-k3 等强模型，无需改代码与 Agent。
+    strong:
+      name: 强模型（决策）
       provider: openai_compatible
       base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
       api_key: sk-xxxxxxx
-      model: qwen3-max
+      model: glm-5.2
       max_total_tokens: 120000
       max_completion_tokens: 32768
-      # Eino 路径模型推理：DeepSeek/OpenAI 为 thinking / reasoning_effort；Claude 4.6+ 为 adaptive + output_config.effort（仅显式配置 effort 时下发）；3.7 为 enabled+budget_tokens:10000（文档示例），effort 不映射，自定义预算用 extra_request_fields
+      # 该通道最大并发 LLM 请求数；0=不限制。按 token plan / agent plan 的并发额度设置，超出的请求排队等待。
+      max_concurrency: 2
+      # 推理控制（可选）：mode auto|on|off；effort low|medium|high|max|xhigh；profile auto|deepseek_compat|openai_compat|output_config_effort
       reasoning:
-        mode: on # auto | on | off；off：OpenAI/Claude 不附加推理字段，DeepSeek 发送 thinking.type=disabled（其默认开启思考）
-        effort: high # low | medium | high | max | xhigh（最高档：OpenAI 常用 xhigh，部分网关用 max，原样下发）；空表示不指定
-        allow_client_reasoning: true # false 时忽略对话请求体 reasoning，仅以下方为准
-        profile: openai_compat # auto | deepseek_compat | openai_compat | output_config_effort
-        # extra_request_fields: {} # 可选：管理员自定义根级 JSON 片段（高级）
+        mode: "on"
+        effort: high
+        profile: openai_compat
+    # 中间档通道（预留）：summarization、漏洞分诊等介于 cheap 与 strong 之间的任务。
+    mid:
+      name: 中间档（预留）
+      provider: openai_compatible
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api_key: sk-xxxxxxx
+      model: glm-5.2
+      max_total_tokens: 120000
+      max_completion_tokens: 32768
+      max_concurrency: 4
+    # 批量执行通道：recon / penetration / business-logic 等子代理的高频调用。
+    cheap:
+      name: 批量执行（经济）
+      provider: openai_compatible
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api_key: sk-xxxxxxx
+      model: glm-5.2
+      max_total_tokens: 120000
+      max_completion_tokens: 16384
+      max_concurrency: 8
 # 视觉分析（analyze_image MCP 工具；图片仅在单次 VL 调用中出现，Agent 上下文只保留文字摘要）
 vision:
   enabled: false # true 且 model 非空时注册 analyze_image

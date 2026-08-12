@@ -128,6 +128,7 @@ func (h *MarkdownAgentsHandler) GetMarkdownAgent(c *gin.Context) {
 		"id":              sub.ID,
 		"name":            sub.Name,
 		"description":     sub.Description,
+		"channel":         sub.Channel,
 		"tools":           sub.RoleTools,
 		"instruction":     sub.Instruction,
 		"bind_role":       sub.BindRole,
@@ -142,6 +143,7 @@ type markdownAgentBody struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
 	Description   string   `json:"description"`
+	Channel       string   `json:"channel"` // AI 通道 ID（ai.channels 的 key）；空=跟随会话通道
 	Tools         []string `json:"tools"`
 	Instruction   string   `json:"instruction"`
 	BindRole      string   `json:"bind_role"`
@@ -187,6 +189,7 @@ func (h *MarkdownAgentsHandler) CreateMarkdownAgent(c *gin.Context) {
 		Name:          strings.TrimSpace(body.Name),
 		Description:   strings.TrimSpace(body.Description),
 		Instruction:   strings.TrimSpace(body.Instruction),
+		Channel:       strings.TrimSpace(body.Channel),
 		RoleTools:     body.Tools,
 		BindRole:      strings.TrimSpace(body.BindRole),
 		MaxIterations: body.MaxIterations,
@@ -258,6 +261,7 @@ func (h *MarkdownAgentsHandler) UpdateMarkdownAgent(c *gin.Context) {
 		Name:          strings.TrimSpace(body.Name),
 		Description:   strings.TrimSpace(body.Description),
 		Instruction:   strings.TrimSpace(body.Instruction),
+		Channel:       strings.TrimSpace(body.Channel),
 		RoleTools:     body.Tools,
 		BindRole:      strings.TrimSpace(body.BindRole),
 		MaxIterations: body.MaxIterations,

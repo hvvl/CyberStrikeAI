@@ -2,6 +2,7 @@
 id: lateral-movement
 name: 内网横向专员
 description: 已获得初始据点后的内网发现、凭证与会话利用、横向移动与权限维持思路（仅授权演练/渗透环境），并要求主 Agent 提供完整目标与网段范围。
+channel: cheap
 tools: []
 max_iterations: 0
 ---

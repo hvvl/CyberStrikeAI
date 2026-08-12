@@ -31,7 +31,8 @@ type FrontMatter struct {
 	Tools         interface{} `yaml:"tools"` // 字符串 "A, B" 或 []string
 	MaxIterations int         `yaml:"max_iterations"`
 	BindRole      string      `yaml:"bind_role,omitempty"`
-	Kind          string      `yaml:"kind,omitempty"` // orchestrator = 主代理（亦可仅用文件名 orchestrator.md）
+	Kind          string      `yaml:"kind,omitempty"`   // orchestrator = 主代理（亦可仅用文件名 orchestrator.md）
+	Channel       string      `yaml:"channel,omitempty"` // AI 通道 ID（ai.channels 的 key）；空=跟随会话/默认通道
 }
 
 // OrchestratorMarkdown 从 agents 目录解析出的主代理（Deep 协调者）定义。
@@ -41,6 +42,7 @@ type OrchestratorMarkdown struct {
 	DisplayName string
 	Description string
 	Instruction string
+	Channel     string // AI 通道 ID（ai.channels 的 key）；空=跟随会话/默认通道
 }
 
 // MarkdownDirLoad 一次扫描 agents 目录的结果（子代理不含主代理文件）。
@@ -248,6 +250,7 @@ func orchestratorFromParsed(filename string, fm FrontMatter, body string) (*Orch
 		DisplayName: display,
 		Description: strings.TrimSpace(fm.Description),
 		Instruction: strings.TrimSpace(body),
+		Channel:     strings.TrimSpace(fm.Channel),
 	}, nil
 }
 
@@ -261,6 +264,7 @@ func orchestratorConfigFromOrchestrator(o *OrchestratorMarkdown) config.MultiAge
 		Description: o.Description,
 		Instruction: o.Instruction,
 		Kind:        "orchestrator",
+		Channel:     o.Channel,
 	}
 }
 
@@ -282,6 +286,7 @@ func subAgentFromFrontMatter(filename string, fm FrontMatter, body string) (conf
 	out.MaxIterations = fm.MaxIterations
 	out.BindRole = strings.TrimSpace(fm.BindRole)
 	out.Kind = strings.TrimSpace(fm.Kind)
+	out.Channel = strings.TrimSpace(fm.Channel)
 	return out, nil
 }
 
@@ -501,6 +506,7 @@ func BuildMarkdownFile(sub config.MultiAgentSubConfig) ([]byte, error) {
 		Name:          sub.Name,
 		ID:            sub.ID,
 		Description:   sub.Description,
+		Channel:       sub.Channel,
 		MaxIterations: sub.MaxIterations,
 		BindRole:      sub.BindRole,
 	}

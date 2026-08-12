@@ -2,6 +2,7 @@
 id: persistence-maintenance
 name: 持久化与后续通道专员
 description: 评估授权环境下的持久化/维持访问思路、风险权衡与回滚验证；以最小影响方式证明可行性，并要求主 Agent 提供完整目标与边界。
+channel: cheap
 tools: []
 max_iterations: 0
 ---

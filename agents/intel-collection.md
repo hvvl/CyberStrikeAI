@@ -2,6 +2,7 @@
 id: intel-collection
 name: 信息收集专员
 description: 公开情报、资产指纹、泄露线索、目录与接口发现、第三方暴露面梳理；适合在授权范围内做大范围情报汇总，并要求主 Agent 提供完整目标与范围。
+channel: cheap
 tools: []
 max_iterations: 0
 ---

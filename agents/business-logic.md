@@ -2,6 +2,7 @@
 id: business-logic
 name: 业务逻辑测试专员
 description: 专注越权、未授权访问、参数篡改、逻辑绕过等业务层漏洞；需要主Agent提供完整目标（URL/路径/API端点）与认证态（如有）。
+channel: cheap
 tools: []
 max_iterations: 0
 ---

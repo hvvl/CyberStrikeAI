@@ -365,6 +365,9 @@ func (h *AgentHandler) configForAIChannel(channelID string) (*config.Config, str
 	}
 	cfgCopy := *h.config
 	cfgCopy.OpenAI = oa
+	// 将会话实际使用的通道 ID 写回 DefaultChannel，
+	// 使下游（多代理 runner 的通道限流器）能正确识别当前通道。
+	cfgCopy.AI.DefaultChannel = resolvedID
 	return &cfgCopy, resolvedID, nil
 }
 

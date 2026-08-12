@@ -5,13 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 	"unicode/utf8"
 
 	"cyberstrike-ai/internal/agent"
@@ -19,7 +16,6 @@ import (
 	"cyberstrike-ai/internal/config"
 	"cyberstrike-ai/internal/database"
 	"cyberstrike-ai/internal/einomcp"
-	"cyberstrike-ai/internal/openai"
 	"cyberstrike-ai/internal/project"
 	"cyberstrike-ai/internal/reasoning"
 	"cyberstrike-ai/internal/security"
@@ -156,24 +152,8 @@ func RunDeepAgent(
 	toolInvokeNotify := einomcp.NewToolInvokeNotifyHolder()
 	mainDefs := ag.ToolsForRole(roleTools)
 
-	httpClient := &http.Client{
-		Timeout: 30 * time.Minute,
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   300 * time.Second,
-				KeepAlive: 300 * time.Second,
-			}).DialContext,
-			MaxIdleConns:          100,
-			MaxIdleConnsPerHost:   10,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   30 * time.Second,
-			ResponseHeaderTimeout: 60 * time.Minute,
-		},
-	}
-
-	// 若配置为 Claude provider，注入自动桥接 transport，对 Eino 透明走 Anthropic Messages API
-	httpClient = openai.NewEinoHTTPClient(&appCfg.OpenAI, httpClient)
-	openai.AttachSummarizationDiagTransport(httpClient, logger)
+	// 会话通道 HTTP 客户端：通道并发限流器 + claude bridge（若启用）+ summarization 诊断。
+	httpClient := buildLLMHTTPClient(&appCfg.OpenAI, appCfg.AI.DefaultChannel, logger)
 
 	maxCompletionTokens := appCfg.OpenAI.MaxCompletionTokensEffective()
 	baseModelCfg := &einoopenai.ChatModelConfig{
@@ -218,7 +198,14 @@ func RunDeepAgent(
 				}
 			}
 
-			baseSubModel, err := einoopenai.NewChatModel(ctx, baseModelCfg)
+			// 子代理通道路由：sub.Channel 为空 → 跟随会话通道（baseModelCfg）。
+			subModelCfg := baseModelCfg
+			if scfg, _, _, serr := modelForAgentChannel(appCfg, sub.Channel, reasoningClient, logger); serr != nil {
+				return nil, fmt.Errorf("子代理 %q AI 通道: %w", id, serr)
+			} else if scfg != nil {
+				subModelCfg = scfg
+			}
+			baseSubModel, err := einoopenai.NewChatModel(ctx, subModelCfg)
 			if err != nil {
 				return nil, fmt.Errorf("子代理 %q ChatModel: %w", id, err)
 			}
@@ -309,7 +296,23 @@ func RunDeepAgent(
 		}
 	}
 
-	baseMainModel, err := einoopenai.NewChatModel(ctx, baseModelCfg)
+	orchInstruction, orchMeta := resolveMainOrchestratorInstruction(orchMode, ma, markdownLoad)
+
+	// 主代理通道路由：orchMeta.Channel 为空 → 跟随会话通道（baseModelCfg）。
+	mainModelCfg := baseModelCfg
+	mainModelOA := appCfg.OpenAI
+	if orchMeta != nil {
+		mcfg, moa, _, merr := modelForAgentChannel(appCfg, orchMeta.Channel, reasoningClient, logger)
+		if merr != nil {
+			return nil, fmt.Errorf("主代理 AI 通道: %w", merr)
+		}
+		if mcfg != nil {
+			mainModelCfg = mcfg
+			mainModelOA = moa
+		}
+	}
+
+	baseMainModel, err := einoopenai.NewChatModel(ctx, mainModelCfg)
 	if err != nil {
 		return nil, fmt.Errorf("多代理主模型: %w", err)
 	}
@@ -325,7 +328,6 @@ func RunDeepAgent(
 	// 与 deep.Config.Name / supervisor 主代理 Name 一致。
 	orchestratorName := "cyberstrike-deep"
 	orchDescription := "Coordinates specialist agents and MCP tools for authorized security testing."
-	orchInstruction, orchMeta := resolveMainOrchestratorInstruction(orchMode, ma, markdownLoad)
 	if orchMeta != nil {
 		if strings.TrimSpace(orchMeta.EinoName) != "" {
 			orchestratorName = strings.TrimSpace(orchMeta.EinoName)
@@ -475,14 +477,9 @@ func RunDeepAgent(
 	var da adk.Agent
 	switch orchMode {
 	case "plan_execute":
-		plannerModelCfg := &einoopenai.ChatModelConfig{
-			APIKey:              appCfg.OpenAI.APIKey,
-			BaseURL:             strings.TrimSuffix(appCfg.OpenAI.BaseURL, "/"),
-			Model:               appCfg.OpenAI.Model,
-			HTTPClient:          httpClient,
-			MaxCompletionTokens: &maxCompletionTokens,
-		}
-		reasoning.ApplyPlanExecutePlannerModelConfig(plannerModelCfg, &appCfg.OpenAI)
+		// planner 与主编排器同通道、同并发 gate。
+		plannerModelCfg := cloneChatModelConfig(mainModelCfg)
+		reasoning.ApplyPlanExecutePlannerModelConfig(plannerModelCfg, &mainModelOA)
 		basePEMainModel, perr := einoopenai.NewChatModel(ctx, plannerModelCfg)
 		if perr != nil {
 			return nil, fmt.Errorf("plan_execute 规划模型: %w", perr)
@@ -490,7 +487,7 @@ func RunDeepAgent(
 		peMainModel := newStreamToolCallIndexRepairModel(basePEMainModel)
 		if logger != nil {
 			logger.Info("plan_execute: planner/replanner 使用无 reasoning 的独立 ChatModel（ToolChoiceForced 兼容）",
-				zap.String("model", appCfg.OpenAI.Model),
+				zap.String("model", mainModelOA.Model),
 			)
 		}
 		baseExecModel, perr := einoopenai.NewChatModel(ctx, baseModelCfg)
@@ -519,7 +516,7 @@ func RunDeepAgent(
 			DB:                   db,
 			ProjectID:            projectID,
 			Logger:               logger,
-			ModelName:            appCfg.OpenAI.Model,
+			ModelName:            mainModelOA.Model,
 			// 与 Deep/Supervisor 主代理同源：patch / reduction / toolsearch / plantask（见 buildPlanExecuteExecutorHandlers）。
 			ExecPreMiddlewares:   mainOrchestratorPre,
 			SkillMiddleware:      einoSkillMW,
