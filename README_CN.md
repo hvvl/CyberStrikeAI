@@ -6,6 +6,8 @@
 
 [中文](README_CN.md) | [English](README.md)
 
+> **🔧 Fork说明**: 本仓库为 [Ed1s0nZ/CyberStrikeAI](https://github.com/Ed1s0nZ/CyberStrikeAI) 的实战增强版，新增 OOB带外检测 / 漏洞搜索三层递进 / 验证码OCR / 业务逻辑测试子Agent / 薄弱点评估矩阵。知识库RAG默认关闭。
+
 **CyberStrikeAI 是 AI 原生网络安全的智能执行中枢——让意图转化为受治理的行动，让证据沉淀为运营记忆，并让每次行动优化下一次行动。**
 
 CyberStrikeAI 将规划、执行、人工监督、证据与复盘连接在同一个可审计工作空间中。项目基于 Go 构建，融合 Eino 智能体、MCP 原生工具、RAG 知识、可视化工作流以及攻击链建模与分析能力，面向已获得明确授权的安全任务。
