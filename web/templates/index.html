@@ -3388,6 +3388,10 @@
                                 <input type="number" id="agent-md-max-iter" min="0" value="0" />
                             </div>
                             <div class="form-group">
+                                <label data-i18n="agentsPage.fieldChannel">AI 通道（如 strong/mid/cheap，对应设置页通道 ID；留空=跟随会话通道）</label>
+                                <input type="text" id="agent-md-channel" placeholder="strong / mid / cheap（留空跟随会话）" autocomplete="off" />
+                            </div>
+                            <div class="form-group">
                                 <label data-i18n="agentsPage.fieldInstruction">系统提示词（Markdown 正文）</label>
                                 <textarea id="agent-md-instruction" rows="14" data-i18n="agentsPage.instructionPlaceholder" data-i18n-attr="placeholder" placeholder="You are a specialist agent..."></textarea>
                             </div>
@@ -3545,6 +3549,11 @@
                                                                 <label for="openai-max-completion-tokens"><span data-i18n="settingsBasic.maxCompletionTokens">最大输出 Token 数</span></label>
                                                                 <input type="number" id="openai-max-completion-tokens" data-i18n="settingsBasic.maxCompletionTokensPlaceholder" data-i18n-attr="placeholder" placeholder="16384" min="1" step="256" />
                                                                 <small class="form-hint" data-i18n="settingsBasic.maxCompletionTokensHint">单次模型回复的输出上限，默认 16384</small>
+                                                            </div>
+                                                            <div class="form-group">
+                                                                <label for="openai-max-concurrency"><span data-i18n="settingsBasic.maxConcurrency">最大并发数</span></label>
+                                                                <input type="number" id="openai-max-concurrency" placeholder="4" min="0" step="1" />
+                                                                <small class="form-hint" data-i18n="settingsBasic.maxConcurrencyHint">该通道同时进行的模型请求上限（HTTP 层信号量，覆盖流式）；0=不限制。避免撞服务商 plan 并发限制。</small>
                                                             </div>
                                                         </div>
                                                     </section>

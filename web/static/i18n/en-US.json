@@ -2440,16 +2440,16 @@
     "errorGeneric": "Something went wrong. Please try again."
   },
   "vulnerabilityPage": {
-	"alertTitle": "Robot vulnerability alerts",
-	"alertDescription": "Push newly discovered vulnerabilities to robots bound to this account, filtered by severity.",
-	"alertHint": "Send newly discovered vulnerabilities at or above this severity to your bound robot accounts.",
-	"alertConfiguredNotBound": "{{platforms}} is enabled, but this Web account is not bound to a recipient identity.",
-	"alertNoBinding": "No proactive robot is both enabled and bound. Your settings are still saved.",
-	"alertBindAction": "Bind recipient account",
-	"alertMinimum": "Minimum severity",
-	"alertEnabled": "Enable alerts",
-	"alertSaved": "Vulnerability alert settings saved",
-	"alertSaveFailed": "Failed to save vulnerability alert settings",
+    "alertTitle": "Robot vulnerability alerts",
+    "alertDescription": "Push newly discovered vulnerabilities to robots bound to this account, filtered by severity.",
+    "alertHint": "Send newly discovered vulnerabilities at or above this severity to your bound robot accounts.",
+    "alertConfiguredNotBound": "{{platforms}} is enabled, but this Web account is not bound to a recipient identity.",
+    "alertNoBinding": "No proactive robot is both enabled and bound. Your settings are still saved.",
+    "alertBindAction": "Bind recipient account",
+    "alertMinimum": "Minimum severity",
+    "alertEnabled": "Enable alerts",
+    "alertSaved": "Vulnerability alert settings saved",
+    "alertSaveFailed": "Failed to save vulnerability alert settings",
     "statTotal": "Total",
     "statClickAll": "View all (clear severity filter)",
     "statClickFilter": "Click to filter by this severity; click again to clear",
@@ -2593,7 +2593,8 @@
     "saveFailed": "Save failed",
     "deleteConfirm": "Delete {{name}}?",
     "deleteOk": "Deleted",
-    "deleteFailed": "Delete failed"
+    "deleteFailed": "Delete failed",
+    "fieldChannel": "AI Channel (e.g. strong/mid/cheap, maps to channel IDs in Settings; empty = follow session channel)"
   },
   "settingsBasic": {
     "basicTitle": "Basic settings",
@@ -2825,7 +2826,9 @@
     "testErrorUnauthorized": "Authentication failed. Check the API Key.",
     "testErrorForbidden": "Request denied. Check account permissions or model access.",
     "testErrorModelUnavailable": "Model is unavailable or the model name is incorrect.",
-    "testErrorBaseUrl": "Base URL is unavailable. Check that the endpoint is correct."
+    "testErrorBaseUrl": "Base URL is unavailable. Check that the endpoint is correct.",
+    "maxConcurrency": "Max Concurrency",
+    "maxConcurrencyHint": "Max concurrent model requests for this channel (HTTP-level semaphore, covers streaming); 0 = unlimited. Prevents hitting provider plan concurrency limits."
   },
   "settingsTerminal": {
     "title": "Terminal",
@@ -4417,10 +4420,22 @@
       }
     },
     "systemRoles": {
-      "admin": { "name": "Administrator", "description": "Full platform administration access" },
-      "operator": { "name": "Operator", "description": "Run daily security workflows without account or core configuration management" },
-      "auditor": { "name": "Auditor", "description": "Read-only access to audits, monitoring, and assets" },
-      "viewer": { "name": "Read-only User", "description": "Read-only access to explicitly granted resources" }
+      "admin": {
+        "name": "Administrator",
+        "description": "Full platform administration access"
+      },
+      "operator": {
+        "name": "Operator",
+        "description": "Run daily security workflows without account or core configuration management"
+      },
+      "auditor": {
+        "name": "Auditor",
+        "description": "Read-only access to audits, monitoring, and assets"
+      },
+      "viewer": {
+        "name": "Read-only User",
+        "description": "Read-only access to explicitly granted resources"
+      }
     },
     "empty": {
       "noMatchingUsers": "No matching members",
@@ -4495,14 +4510,20 @@
       "workflow": "Workflows"
     },
     "permissionDescriptions": {
-      "auth": { "self": "Manage own session and password" },
-      "dashboard": { "read": "View dashboard summaries" },
+      "auth": {
+        "self": "Manage own session and password"
+      },
+      "dashboard": {
+        "read": "View dashboard summaries"
+      },
       "chat": {
         "read": "View conversations",
         "write": "Create and update conversations",
         "delete": "Delete conversations and turns"
       },
-      "agent": { "execute": "Run AI agents and workflows" },
+      "agent": {
+        "execute": "Run AI agents and workflows"
+      },
       "hitl": {
         "read": "View human-in-the-loop queues and logs",
         "write": "Approve, dismiss, and configure human-in-the-loop requests"
@@ -4565,7 +4586,9 @@
         "read": "View system configuration",
         "write": "Update and apply system configuration"
       },
-      "terminal": { "execute": "Execute terminal commands" },
+      "terminal": {
+        "execute": "Execute terminal commands"
+      },
       "audit": {
         "read": "View and export audit logs",
         "delete": "Delete audit logs"
@@ -4591,8 +4614,12 @@
         "read": "View attack chains",
         "write": "Regenerate attack chains"
       },
-      "fofa": { "execute": "Run FOFA searches and parse queries" },
-      "openapi": { "read": "Read OpenAPI aggregation results" },
+      "fofa": {
+        "execute": "Run FOFA searches and parse queries"
+      },
+      "openapi": {
+        "read": "Read OpenAPI aggregation results"
+      },
       "group": {
         "read": "View conversation groups",
         "write": "Create and update conversation groups",

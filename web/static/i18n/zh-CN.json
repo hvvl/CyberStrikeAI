@@ -2428,16 +2428,16 @@
     "errorGeneric": "操作失败，请稍后重试。"
   },
   "vulnerabilityPage": {
-	"alertTitle": "机器人漏洞提醒",
-	"alertDescription": "按严重级别将新发现的漏洞推送至当前账号绑定的机器人。",
-	"alertHint": "发现符合级别的新漏洞后，通过已绑定机器人账号推送。",
-	"alertConfiguredNotBound": "{{platforms}}已启用，但当前 Web 账号尚未绑定对应的接收身份。",
-	"alertNoBinding": "尚未启用并绑定支持主动推送的机器人。设置仍会保存。",
-	"alertBindAction": "绑定接收账号",
-	"alertMinimum": "最低级别",
-	"alertEnabled": "启用提醒",
-	"alertSaved": "漏洞提醒设置已保存",
-	"alertSaveFailed": "保存漏洞提醒设置失败",
+    "alertTitle": "机器人漏洞提醒",
+    "alertDescription": "按严重级别将新发现的漏洞推送至当前账号绑定的机器人。",
+    "alertHint": "发现符合级别的新漏洞后，通过已绑定机器人账号推送。",
+    "alertConfiguredNotBound": "{{platforms}}已启用，但当前 Web 账号尚未绑定对应的接收身份。",
+    "alertNoBinding": "尚未启用并绑定支持主动推送的机器人。设置仍会保存。",
+    "alertBindAction": "绑定接收账号",
+    "alertMinimum": "最低级别",
+    "alertEnabled": "启用提醒",
+    "alertSaved": "漏洞提醒设置已保存",
+    "alertSaveFailed": "保存漏洞提醒设置失败",
     "statTotal": "总漏洞数",
     "statClickAll": "查看全部（清除严重度筛选）",
     "statClickFilter": "点击按此严重度筛选；再次点击清除",
@@ -2581,7 +2581,8 @@
     "saveFailed": "保存失败",
     "deleteConfirm": "确定删除 {{name}} 吗？",
     "deleteOk": "已删除",
-    "deleteFailed": "删除失败"
+    "deleteFailed": "删除失败",
+    "fieldChannel": "AI 通道（如 strong/mid/cheap，对应设置页通道 ID；留空=跟随会话通道）"
   },
   "settingsBasic": {
     "basicTitle": "基本设置",
@@ -2813,7 +2814,9 @@
     "testErrorUnauthorized": "认证失败，请检查 API Key",
     "testErrorForbidden": "请求被拒绝，请检查账号权限或模型访问权限",
     "testErrorModelUnavailable": "模型不可用或模型名不正确，请检查模型名称",
-    "testErrorBaseUrl": "Base URL 不可用，请检查地址是否正确"
+    "testErrorBaseUrl": "Base URL 不可用，请检查地址是否正确",
+    "maxConcurrency": "最大并发数",
+    "maxConcurrencyHint": "该通道同时进行的模型请求上限（HTTP 层信号量，覆盖流式）；0=不限制。避免撞服务商 plan 并发限制。"
   },
   "settingsTerminal": {
     "title": "终端",
@@ -4405,10 +4408,22 @@
       }
     },
     "systemRoles": {
-      "admin": { "name": "管理员", "description": "全局管理权限" },
-      "operator": { "name": "操作员", "description": "可执行日常安全工作流，不能管理账号与核心配置" },
-      "auditor": { "name": "审计员", "description": "只读查看审计、监控与资产" },
-      "viewer": { "name": "只读用户", "description": "只读查看被授权资源" }
+      "admin": {
+        "name": "管理员",
+        "description": "全局管理权限"
+      },
+      "operator": {
+        "name": "操作员",
+        "description": "可执行日常安全工作流，不能管理账号与核心配置"
+      },
+      "auditor": {
+        "name": "审计员",
+        "description": "只读查看审计、监控与资产"
+      },
+      "viewer": {
+        "name": "只读用户",
+        "description": "只读查看被授权资源"
+      }
     },
     "empty": {
       "noMatchingUsers": "没有匹配的成员",
@@ -4483,14 +4498,20 @@
       "workflow": "工作流"
     },
     "permissionDescriptions": {
-      "auth": { "self": "管理自己的会话和密码" },
-      "dashboard": { "read": "查看仪表盘汇总" },
+      "auth": {
+        "self": "管理自己的会话和密码"
+      },
+      "dashboard": {
+        "read": "查看仪表盘汇总"
+      },
       "chat": {
         "read": "查看对话",
         "write": "创建和更新对话",
         "delete": "删除对话和消息轮次"
       },
-      "agent": { "execute": "运行 AI 智能体和工作流" },
+      "agent": {
+        "execute": "运行 AI 智能体和工作流"
+      },
       "hitl": {
         "read": "查看人机协同队列和日志",
         "write": "审批、驳回和配置人机协同"
@@ -4553,7 +4574,9 @@
         "read": "查看系统配置",
         "write": "更新并应用系统配置"
       },
-      "terminal": { "execute": "执行终端命令" },
+      "terminal": {
+        "execute": "执行终端命令"
+      },
       "audit": {
         "read": "查看和导出审计日志",
         "delete": "删除审计日志"
@@ -4579,8 +4602,12 @@
         "read": "查看攻击链",
         "write": "重新生成攻击链"
       },
-      "fofa": { "execute": "执行 FOFA 搜索和查询解析" },
-      "openapi": { "read": "读取 OpenAPI 聚合结果" },
+      "fofa": {
+        "execute": "执行 FOFA 搜索和查询解析"
+      },
+      "openapi": {
+        "read": "读取 OpenAPI 聚合结果"
+      },
       "group": {
         "read": "查看对话分组",
         "write": "创建和更新对话分组",

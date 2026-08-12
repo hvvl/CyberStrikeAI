@@ -105,6 +105,8 @@ function showAddMarkdownAgentModal() {
     document.getElementById('agent-md-tools').value = '';
     document.getElementById('agent-md-bind-role').value = '';
     document.getElementById('agent-md-max-iter').value = '0';
+    var chResetEl = document.getElementById('agent-md-channel');
+    if (chResetEl) chResetEl.value = '';
     document.getElementById('agent-md-instruction').value = '';
     openAppModal('agent-md-modal');
 }
@@ -137,6 +139,8 @@ async function editMarkdownAgent(filename) {
             document.getElementById('agent-md-tools').value = Array.isArray(data.tools) ? data.tools.join(', ') : '';
             document.getElementById('agent-md-bind-role').value = data.bind_role || '';
             document.getElementById('agent-md-max-iter').value = String(data.max_iterations != null ? data.max_iterations : 0);
+            var chEl = document.getElementById('agent-md-channel');
+            if (chEl) chEl.value = data.channel || '';
             document.getElementById('agent-md-instruction').value = data.instruction || '';
             document.getElementById('agent-md-name')?.focus();
         });
@@ -183,6 +187,7 @@ async function saveMarkdownAgent() {
         instruction: instruction,
         bind_role: document.getElementById('agent-md-bind-role').value.trim(),
         max_iterations: parseInt(document.getElementById('agent-md-max-iter').value, 10) || 0,
+        channel: (document.getElementById('agent-md-channel')?.value || '').trim(),
         kind: roleVal === 'orchestrator' ? 'orchestrator' : ''
     };
     const isEdit = !!markdownAgentsEditingFilename;
