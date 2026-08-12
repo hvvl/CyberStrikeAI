@@ -973,6 +973,11 @@
                                                     </button>
                                                 </div>
                                             </div>
+                                            <button class="batch-manage-btn continue-failed-btn" data-require-permission="chat:write" onclick="showContinueFailedModal()" data-i18n="chat.continueFailedConversations" data-i18n-attr="title" data-i18n-skip-text="true" title="继续失败的会话">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                    <path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                                </svg>
+                                            </button>
                                             <button class="batch-manage-btn" data-require-permission="chat:delete" onclick="showBatchManageModal()" data-i18n="chat.batchManage" data-i18n-attr="title" data-i18n-skip-text="true" title="批量管理">
                                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                                     <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -5835,6 +5840,35 @@
                 <div class="batch-footer-actions">
                     <button class="btn-secondary" onclick="closeBatchManageModal()" data-i18n="common.cancel">取消</button>
                     <button class="btn-primary" data-require-permission="chat:delete" onclick="deleteSelectedConversations()" data-i18n="batchManageModal.deleteSelected">删除所选</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 一键继续失败会话模态框 -->
+    <div id="continue-failed-modal" class="modal">
+        <div class="modal-content batch-manage-modal-content">
+            <div class="modal-header">
+                <h2><span data-i18n="continueFailedModal.title">继续失败的会话</span>·共<span id="continue-failed-count">0</span>条</h2>
+                <div class="batch-manage-header-actions">
+                    <span class="modal-close" onclick="closeContinueFailedModal()">&times;</span>
+                </div>
+            </div>
+            <div class="modal-body batch-manage-body">
+                <p class="continue-failed-hint" data-i18n="continueFailedModal.hint">以下会话的上一次执行因 API 调用失败而中断。点击「全部继续」将按队列顺序在后台逐个恢复执行；也可以单独继续某个会话。</p>
+                <div class="batch-conversations-table">
+                    <div class="batch-table-header">
+                        <div class="batch-table-col-name" data-i18n="batchManageModal.conversationName">对话名称</div>
+                        <div class="batch-table-col-time" data-i18n="continueFailedModal.failedAt">失败时间</div>
+                        <div class="batch-table-col-action" data-i18n="batchManageModal.action">操作</div>
+                    </div>
+                    <div id="continue-failed-list" class="batch-conversations-list"></div>
+                </div>
+            </div>
+            <div class="modal-footer batch-manage-footer">
+                <div class="batch-footer-actions">
+                    <button class="btn-secondary" onclick="closeContinueFailedModal()" data-i18n="common.cancel">取消</button>
+                    <button class="btn-primary" id="continue-failed-all-btn" onclick="continueAllFailedConversations()" data-i18n="continueFailedModal.continueAll">全部继续</button>
                 </div>
             </div>
         </div>

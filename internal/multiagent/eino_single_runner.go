@@ -220,6 +220,7 @@ func RunEinoSingleChatModelAgent(
 		return "orchestrator"
 	}
 
+	retryAttempts, retryBackoffSec := ResolveEinoRunRetryArgs(&ma.EinoMiddleware, &appCfg.OpenAI)
 	return runEinoADKAgentLoop(ctx, &einoADKRunLoopArgs{
 		OrchMode:                "eino_single",
 		OrchestratorName:        einoSingleAgentName,
@@ -230,8 +231,9 @@ func RunEinoSingleChatModelAgent(
 		StreamsMainAssistant:    streamsMainAssistant,
 		EinoRoleTag:             einoRoleTag,
 		CheckpointDir:           ma.EinoMiddleware.CheckpointDir,
-		RunRetryMaxAttempts:     ma.EinoMiddleware.RunRetryMaxAttempts,
-		RunRetryMaxBackoffSec:   ma.EinoMiddleware.RunRetryMaxBackoffSec,
+		RunRetryMaxAttempts:     retryAttempts,
+		RunRetryMaxBackoffSec:   retryBackoffSec,
+		ChannelID:               appCfg.AI.DefaultChannel,
 		McpIDsMu:                &mcpIDsMu,
 		McpIDs:                  &mcpIDs,
 		FilesystemMonitorAgent:  ag,

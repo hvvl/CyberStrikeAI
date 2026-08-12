@@ -612,6 +612,7 @@ func RunDeepAgent(
 		return "sub"
 	}
 
+	retryAttempts, retryBackoffSec := ResolveEinoRunRetryArgs(&ma.EinoMiddleware, &appCfg.OpenAI)
 	return runEinoADKAgentLoop(ctx, &einoADKRunLoopArgs{
 		OrchMode:                orchMode,
 		OrchestratorName:        orchestratorName,
@@ -622,8 +623,9 @@ func RunDeepAgent(
 		StreamsMainAssistant:    streamsMainAssistant,
 		EinoRoleTag:             einoRoleTag,
 		CheckpointDir:           ma.EinoMiddleware.CheckpointDir,
-		RunRetryMaxAttempts:     ma.EinoMiddleware.RunRetryMaxAttempts,
-		RunRetryMaxBackoffSec:   ma.EinoMiddleware.RunRetryMaxBackoffSec,
+		RunRetryMaxAttempts:     retryAttempts,
+		RunRetryMaxBackoffSec:   retryBackoffSec,
+		ChannelID:               appCfg.AI.DefaultChannel,
 		McpIDsMu:                &mcpIDsMu,
 		McpIDs:                  &mcpIDs,
 		FilesystemMonitorAgent:  ag,

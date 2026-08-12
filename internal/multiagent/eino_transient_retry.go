@@ -18,9 +18,14 @@ import (
 )
 
 const (
-	defaultEinoRunRetryMaxAttempts = 4
+	defaultEinoRunRetryMaxAttempts = 6
 	defaultEinoRunRetryMaxBackoff  = 30 * time.Second
 )
+
+// ErrRetryExhausted 标记「当前通道的临时错误重试已用尽」。handler 层据此判断
+// 是否切换 fallback 通道续跑（见 OpenAIConfig.FallbackChannel）；不带该标记的
+// 错误按普通失败处理。
+var ErrRetryExhausted = errors.New("eino: transient retry exhausted")
 
 var httpStatusInErrorPattern = regexp.MustCompile(`(?i)(?:http|status(?:\s+code)?|upstream\s+returned)\s*[:=]?\s*(\d{3})\b`)
 
@@ -188,12 +193,22 @@ func httpStatusFromErrorText(msg string) int {
 type einoTransientRunRetryPolicy struct {
 	maxAttempts int
 	maxBackoff  time.Duration
+	// channelID 仅供日志/UI 展示当前重试所属通道（通道级重试参数已解析进 maxAttempts/maxBackoff）。
+	channelID string
+}
+
+func (a *einoADKRunLoopArgs) channelID() string {
+	if a == nil {
+		return ""
+	}
+	return a.ChannelID
 }
 
 func einoTransientRunRetryPolicyFromArgs(args *einoADKRunLoopArgs) einoTransientRunRetryPolicy {
 	return einoTransientRunRetryPolicy{
 		maxAttempts: einoRunRetryMaxAttempts(args),
 		maxBackoff:  einoRunRetryMaxBackoff(args),
+		channelID:   args.channelID(),
 	}
 }
 
@@ -205,6 +220,28 @@ func einoTransientRunRetryPolicyFromMW(mw *config.MultiAgentEinoMiddlewareConfig
 	return einoTransientRunRetryPolicy{
 		maxAttempts: RunRetryMaxAttemptsFromConfig(mw),
 		maxBackoff:  maxBackoff,
+	}
+}
+
+// einoTransientRunRetryPolicyForChannel 解析某通道的生效重试策略：
+// 通道级 run_retry_max_attempts / run_retry_max_backoff_sec 优先，
+// 0 时回退全局 eino_middleware，再回退内置默认值。
+func einoTransientRunRetryPolicyForChannel(mw *config.MultiAgentEinoMiddlewareConfig, oa *config.OpenAIConfig, channelID string) einoTransientRunRetryPolicy {
+	maxAttempts := RunRetryMaxAttemptsFromConfig(mw)
+	maxBackoff := defaultEinoRunRetryMaxBackoff
+	if mw != nil && mw.RunRetryMaxBackoffSec > 0 {
+		maxBackoff = time.Duration(mw.RunRetryMaxBackoffSec) * time.Second
+	}
+	if oa != nil && oa.RunRetryMaxAttempts > 0 {
+		maxAttempts = oa.RunRetryMaxAttempts
+	}
+	if oa != nil && oa.RunRetryMaxBackoffSec > 0 {
+		maxBackoff = time.Duration(oa.RunRetryMaxBackoffSec) * time.Second
+	}
+	return einoTransientRunRetryPolicy{
+		maxAttempts: maxAttempts,
+		maxBackoff:  maxBackoff,
+		channelID:   channelID,
 	}
 }
 
@@ -231,7 +268,7 @@ func (r *einoTransientRunRetrier) tryRetry(
 	}
 	r.attempts++
 	if r.attempts > r.policy.maxAttempts {
-		return false, nil, "", 0, fmt.Errorf("transient retry exhausted after %d attempts: %w", r.policy.maxAttempts, runErr)
+		return false, nil, "", 0, fmt.Errorf("transient retry exhausted after %d attempts: %w: %w", r.policy.maxAttempts, ErrRetryExhausted, runErr)
 	}
 	backoff = einoTransientRetryBackoff(r.attempts-1, r.policy.maxBackoff)
 	select {
@@ -263,6 +300,14 @@ func RunRetryMaxAttemptsFromConfig(mw *config.MultiAgentEinoMiddlewareConfig) in
 		return mw.RunRetryMaxAttempts
 	}
 	return defaultEinoRunRetryMaxAttempts
+}
+
+// ResolveEinoRunRetryArgs 合并「全局 eino_middleware + 通道级覆盖」后的重试参数，
+// 供 handler 构建 einoADKRunLoopArgs 时传入（通道级 > 全局 > 内置默认）。
+func ResolveEinoRunRetryArgs(mw *config.MultiAgentEinoMiddlewareConfig, oa *config.OpenAIConfig) (attempts, backoffSec int) {
+	p := einoTransientRunRetryPolicyForChannel(mw, oa, "")
+	backoffSec = int(p.maxBackoff / time.Second)
+	return p.maxAttempts, backoffSec
 }
 
 func einoRunRetryMaxBackoff(args *einoADKRunLoopArgs) time.Duration {

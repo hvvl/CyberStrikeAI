@@ -11231,3 +11231,173 @@ if (typeof window !== 'undefined') {
     window.refreshAllProjectFilterSelects = refreshAllProjectFilterSelects;
     window.onConversationProjectFilterChange = onConversationProjectFilterChange;
 }
+
+// ============================================================
+// 一键继续失败会话（API 调用失败后重试耗尽的会话）
+// ============================================================
+let continueFailedItems = [];
+
+function _cfT(key, fallback, opts) {
+    if (typeof window.t === 'function') {
+        return window.t(key, opts);
+    }
+    return fallback;
+}
+
+function formatFailedAt(iso) {
+    try {
+        const d = iso ? new Date(iso) : null;
+        if (!d || isNaN(d.getTime())) return '-';
+        return d.toLocaleString();
+    } catch (e) {
+        return '-';
+    }
+}
+
+function renderContinueFailedList() {
+    const listEl = document.getElementById('continue-failed-list');
+    const countEl = document.getElementById('continue-failed-count');
+    if (!listEl) return;
+    if (countEl) countEl.textContent = String(continueFailedItems.length);
+
+    if (!continueFailedItems.length) {
+        listEl.innerHTML = '<div class="continue-failed-empty">' + escapeHtml(_cfT('continueFailedModal.empty', '没有因 API 调用失败而中断的会话。')) + '</div>';
+        return;
+    }
+
+    listEl.innerHTML = continueFailedItems.map(function (item) {
+        const title = safeTruncateText(item.title || _cfT('continueFailedModal.untitled', '未命名会话'), 60);
+        const preview = item.errorPreview || '';
+        const failedAt = formatFailedAt(item.failedAt);
+        return '<div class="batch-conversation-row" data-continue-failed-row="' + escapeHtml(item.conversationId) + '">'
+            + '<div class="batch-table-col-name">'
+            + '<div>' + escapeHtml(title) + '</div>'
+            + (preview ? '<span class="continue-failed-error-preview" title="' + escapeHtml(preview) + '">' + escapeHtml(preview) + '</span>' : '')
+            + '</div>'
+            + '<div class="batch-table-col-time continue-failed-time">' + escapeHtml(failedAt) + '</div>'
+            + '<div class="batch-table-col-action">'
+            + '<button type="button" class="continue-failed-row-btn" onclick="continueSingleFailedConversation(\'' + escapeHtml(item.conversationId) + '\')">'
+            + escapeHtml(_cfT('continueFailedModal.continueOne', '继续'))
+            + '</button>'
+            + '</div>'
+            + '</div>';
+    }).join('');
+}
+
+async function showContinueFailedModal() {
+    continueFailedItems = [];
+    renderContinueFailedList();
+    openAppModal('continue-failed-modal', { focus: false });
+    const listEl = document.getElementById('continue-failed-list');
+    if (listEl) {
+        listEl.innerHTML = '<div class="continue-failed-empty">' + escapeHtml(_cfT('continueFailedModal.loading', '加载中…')) + '</div>';
+    }
+    try {
+        const res = await apiFetch('/api/agent-loop/failed');
+        const data = res && res.items ? res.items : [];
+        continueFailedItems = Array.isArray(data) ? data : [];
+    } catch (error) {
+        console.error('加载失败会话列表失败:', error);
+        if (listEl) {
+            listEl.innerHTML = '<div class="continue-failed-empty">' + escapeHtml(_cfT('continueFailedModal.loadFailed', '加载失败会话列表出错')) + '</div>';
+        }
+        const countEl = document.getElementById('continue-failed-count');
+        if (countEl) countEl.textContent = '0';
+        return;
+    }
+    renderContinueFailedList();
+}
+
+function closeContinueFailedModal() {
+    closeAppModal('continue-failed-modal');
+}
+
+function _markContinueFailedRowBusy(conversationId) {
+    const row = document.querySelector('[data-continue-failed-row="' + conversationId + '"]');
+    if (!row) return;
+    const btn = row.querySelector('.continue-failed-row-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = _cfT('continueFailedModal.continuing', '续跑中');
+    }
+}
+
+function _removeContinueFailedRow(conversationId) {
+    continueFailedItems = continueFailedItems.filter(function (it) {
+        return it.conversationId !== conversationId;
+    });
+    const countEl = document.getElementById('continue-failed-count');
+    if (countEl) countEl.textContent = String(continueFailedItems.length);
+    const row = document.querySelector('[data-continue-failed-row="' + conversationId + '"]');
+    if (row && row.parentNode) row.parentNode.removeChild(row);
+    if (!continueFailedItems.length) {
+        const listEl = document.getElementById('continue-failed-list');
+        if (listEl) {
+            listEl.innerHTML = '<div class="continue-failed-empty">' + escapeHtml(_cfT('continueFailedModal.empty', '没有因 API 调用失败而中断的会话。')) + '</div>';
+        }
+    }
+}
+
+async function continueSingleFailedConversation(conversationId) {
+    if (!conversationId) return;
+    _markContinueFailedRowBusy(conversationId);
+    try {
+        const res = await apiFetch('/api/agent-loop/continue-failed', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversationIds: [conversationId] })
+        });
+        if (res && res.queued > 0) {
+            _removeContinueFailedRow(conversationId);
+            alert(_cfT('continueFailedModal.queuedOne', '已加入后台续跑队列，可打开该会话查看进度。'));
+        } else {
+            const reason = res && Array.isArray(res.skipped) && res.skipped.length ? res.skipped[0].reason : '';
+            alert(_cfT('continueFailedModal.queueFailed', '加入续跑队列失败') + (reason ? ': ' + reason : ''));
+            renderContinueFailedList();
+        }
+    } catch (error) {
+        console.error('续跑失败:', error);
+        alert(_cfT('continueFailedModal.queueFailed', '加入续跑队列失败') + ': ' + (error && error.message ? error.message : String(error)));
+        renderContinueFailedList();
+    }
+}
+
+async function continueAllFailedConversations() {
+    const btn = document.getElementById('continue-failed-all-btn');
+    if (btn) btn.disabled = true;
+    try {
+        const res = await apiFetch('/api/agent-loop/continue-failed', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        const queued = res && typeof res.queued === 'number' ? res.queued : 0;
+        if (queued > 0) {
+            continueFailedItems = [];
+            renderContinueFailedList();
+            alert(_cfT('continueFailedModal.queuedAll', '已将 ' + queued + ' 个失败会话加入后台续跑队列。', { count: queued }));
+            closeContinueFailedModal();
+            if (typeof loadConversationsWithGroups === 'function') {
+                loadConversationsWithGroups();
+            }
+        } else {
+            const skipped = res && Array.isArray(res.skipped) ? res.skipped : [];
+            alert(skipped.length
+                ? _cfT('continueFailedModal.allSkipped', '没有可继续的会话（正在执行或已在队列中）。')
+                : _cfT('continueFailedModal.empty', '没有因 API 调用失败而中断的会话。'));
+            await showContinueFailedModal();
+        }
+    } catch (error) {
+        console.error('一键续跑失败:', error);
+        alert(_cfT('continueFailedModal.queueFailed', '加入续跑队列失败') + ': ' + (error && error.message ? error.message : String(error)));
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.showContinueFailedModal = showContinueFailedModal;
+    window.closeContinueFailedModal = closeContinueFailedModal;
+    window.continueSingleFailedConversation = continueSingleFailedConversation;
+    window.continueAllFailedConversations = continueAllFailedConversations;
+}

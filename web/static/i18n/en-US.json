@@ -560,6 +560,7 @@
     "sortByCreatedAt": "Created time",
     "sortByUpdatedAt": "Updated time",
     "batchManage": "Batch manage",
+    "continueFailedConversations": "Continue failed conversations",
     "paginationShow": "Show {{start}}-{{end}} of {{total}}",
     "paginationRange": "{{start}}-{{end}}/{{total}}",
     "paginationTotal": "{{total}} total",
@@ -3225,6 +3226,21 @@
     "titlePlaceholder": "Knowledge item title",
     "contentLabel": "Content (Markdown)",
     "contentPlaceholder": "Enter content in Markdown..."
+  },
+  "continueFailedModal": {
+    "title": "Continue failed conversations",
+    "hint": "The last run of the conversations below was interrupted by failed API calls. Click \"Continue all\" to resume them in a background queue in order, or continue any single conversation.",
+    "empty": "No conversations interrupted by failed API calls.",
+    "loading": "Loading…",
+    "loadFailed": "Failed to load the list of failed conversations",
+    "untitled": "Untitled conversation",
+    "failedAt": "Failed at",
+    "continueOne": "Continue",
+    "continuing": "Resuming",
+    "queuedOne": "Added to the background resume queue. Open the conversation to track progress.",
+    "queueFailed": "Failed to add to the resume queue",
+    "queuedAll": "Added {{count}} failed conversation(s) to the background resume queue.",
+    "allSkipped": "No conversations can be continued (already running or queued)."
   },
   "batchManageModal": {
     "title": "Manage conversations · {{count}} total",

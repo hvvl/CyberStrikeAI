@@ -18486,6 +18486,70 @@ tr.mcp-stats-tool-row[data-tool-name]:focus-visible {
     flex-direction: column;
 }
 
+/* 一键继续失败会话模态框：3 列布局（名称 / 失败时间 / 操作） */
+#continue-failed-modal .batch-table-header,
+#continue-failed-modal .batch-conversation-row {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.7fr) 88px;
+}
+
+.continue-failed-hint {
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--primary-color, #4f7cff);
+    border-radius: 6px;
+    line-height: 1.6;
+}
+
+.continue-failed-empty {
+    padding: 28px 16px;
+    text-align: center;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+.continue-failed-time {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.continue-failed-error-preview {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.75rem;
+    color: var(--danger-color, #e5484d);
+    opacity: 0.85;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.continue-failed-row-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 12px;
+    font-size: 0.8125rem;
+    color: var(--primary-color, #4f7cff);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.continue-failed-row-btn:hover {
+    background: var(--bg-tertiary);
+}
+
+.continue-failed-row-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .batch-conversation-row {
     display: grid;
     grid-template-columns: 40px minmax(0, 1.1fr) minmax(0, 0.75fr) minmax(0, 0.75fr) 160px 72px;

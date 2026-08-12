@@ -165,7 +165,7 @@ func newEinoSummarizationMiddleware(
 		}
 	}
 
-	retryPolicy := einoTransientRunRetryPolicyFromMW(mwCfg)
+	retryPolicy := einoTransientRunRetryPolicyForChannel(mwCfg, &appCfg.OpenAI, appCfg.AI.DefaultChannel)
 	retryMax := retryPolicy.maxAttempts
 	var summaryOverflowRetries int
 

@@ -79,9 +79,12 @@ type einoADKRunLoopArgs struct {
 	StreamsMainAssistant func(agent string) bool
 	EinoRoleTag          func(agent string) string
 	CheckpointDir        string
-	// RunRetryMaxAttempts / RunRetryMaxBackoffSec：429、5xx、网络抖动时的指数退避续跑（0=默认 4 次 / 30s 上限）。
+	// RunRetryMaxAttempts / RunRetryMaxBackoffSec：429、5xx、网络抖动时的指数退避续跑（0=默认 6 次 / 30s 上限）。
+	// 调用方应通过 ResolveEinoRunRetryArgs 合并通道级覆盖后再传入。
 	RunRetryMaxAttempts   int
 	RunRetryMaxBackoffSec int
+	// ChannelID 当前 Run 使用的 AI 通道 ID（ai.channels 键），仅用于重试日志/进度展示。
+	ChannelID string
 
 	McpIDsMu *sync.Mutex
 	McpIDs   *[]string
@@ -599,10 +602,16 @@ func runEinoADKAgentLoop(ctx context.Context, args *einoADKRunLoopArgs, baseMsgs
 		}
 		if progress != nil {
 			errorKind, errorSummary := einoTransientRunErrorUserDetail(runErr)
-			progress("eino_run_retry", fmt.Sprintf("遇到临时错误，%d 秒后第 %d/%d 次重试。原因：%s", int(backoff.Seconds()), attemptNo, maxAttempts, errorSummary), map[string]interface{}{
+			channelID := args.channelID()
+			retryMsg := fmt.Sprintf("遇到临时错误，%d 秒后第 %d/%d 次重试。原因：%s", int(backoff.Seconds()), attemptNo, maxAttempts, errorSummary)
+			if channelID != "" {
+				retryMsg = fmt.Sprintf("通道 %s 遇到临时错误，%d 秒后第 %d/%d 次重试。原因：%s", channelID, int(backoff.Seconds()), attemptNo, maxAttempts, errorSummary)
+			}
+			progress("eino_run_retry", retryMsg, map[string]interface{}{
 				"conversationId": conversationID,
 				"source":         "eino",
 				"orchestration":  orchMode,
+				"channelId":      channelID,
 				"error":          runErr.Error(),
 				"errorKind":      errorKind,
 				"errorSummary":   errorSummary,

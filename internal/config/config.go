@@ -843,6 +843,12 @@ type OpenAIConfig struct {
 	// MaxConcurrency 该通道允许的最大并发 LLM 请求数；0 表示不限制。
 	// 由 AIChannelConfig.MaxConcurrency 透传，用于适配 token plan / agent plan 的并发额度。
 	MaxConcurrency int `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
+	// RunRetryMaxAttempts / RunRetryMaxBackoffSec 通道级重试策略覆盖：
+	// 429/5xx/网络抖动时的退避重试次数与单次退避上限；0 = 沿用全局 eino_middleware 配置。
+	RunRetryMaxAttempts int `yaml:"run_retry_max_attempts,omitempty" json:"run_retry_max_attempts,omitempty"`
+	RunRetryMaxBackoffSec int `yaml:"run_retry_max_backoff_sec,omitempty" json:"run_retry_max_backoff_sec,omitempty"`
+	// FallbackChannel 本通道重试耗尽后自动切换的备用通道 ID（ai.channels 中的键）；空 = 不做跨通道降级。
+	FallbackChannel string `yaml:"fallback_channel,omitempty" json:"fallback_channel,omitempty"`
 	// Reasoning 控制 Eino ChatModel 的 thinking / reasoning_effort / output_config 等（Eino 单/多代理路径生效）。
 	Reasoning OpenAIReasoningConfig `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
 }
@@ -865,6 +871,12 @@ type AIChannelConfig struct {
 	// MaxConcurrency 该通道允许的最大并发 LLM 请求数；0 表示不限制。
 	// 用于适配 token plan / agent plan 的并发额度（如阿里云、火山引擎），超出的请求排队等待。
 	MaxConcurrency int                   `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
+	// RunRetryMaxAttempts / RunRetryMaxBackoffSec 通道级重试策略覆盖；0 = 沿用全局 eino_middleware 配置。
+	// 不同套餐限流特性不同（token plan 与 agent plan），可为每个通道单独调节重试强度。
+	RunRetryMaxAttempts int `yaml:"run_retry_max_attempts,omitempty" json:"run_retry_max_attempts,omitempty"`
+	RunRetryMaxBackoffSec int `yaml:"run_retry_max_backoff_sec,omitempty" json:"run_retry_max_backoff_sec,omitempty"`
+	// FallbackChannel 本通道重试耗尽后自动切换的备用通道 ID；空 = 不做跨通道降级。
+	FallbackChannel string              `yaml:"fallback_channel,omitempty" json:"fallback_channel,omitempty"`
 	Reasoning      OpenAIReasoningConfig `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
 }
 
@@ -881,6 +893,9 @@ func (c AIChannelConfig) ToOpenAIConfig() OpenAIConfig {
 		MaxTotalTokens:      c.MaxTotalTokens,
 		MaxCompletionTokens: c.MaxCompletionTokens,
 		MaxConcurrency:      c.MaxConcurrency,
+		RunRetryMaxAttempts:   c.RunRetryMaxAttempts,
+		RunRetryMaxBackoffSec: c.RunRetryMaxBackoffSec,
+		FallbackChannel:     c.FallbackChannel,
 		Reasoning:           c.Reasoning,
 	}
 }
@@ -897,8 +912,11 @@ func AIChannelFromOpenAI(id, name string, oa OpenAIConfig) AIChannelConfig {
 		Model:               oa.Model,
 		MaxTotalTokens:      oa.MaxTotalTokens,
 		MaxCompletionTokens: oa.MaxCompletionTokens,
-		MaxConcurrency:      oa.MaxConcurrency,
-		Reasoning:           oa.Reasoning,
+		MaxConcurrency:        oa.MaxConcurrency,
+		RunRetryMaxAttempts:   oa.RunRetryMaxAttempts,
+		RunRetryMaxBackoffSec: oa.RunRetryMaxBackoffSec,
+		FallbackChannel:       oa.FallbackChannel,
+		Reasoning:             oa.Reasoning,
 	}
 }
 

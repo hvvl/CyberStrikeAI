@@ -548,6 +548,7 @@
     "sortByCreatedAt": "创建时间",
     "sortByUpdatedAt": "更新时间",
     "batchManage": "批量管理",
+    "continueFailedConversations": "继续失败的会话",
     "paginationShow": "显示 {{start}}-{{end}} / 共 {{total}}",
     "paginationRange": "{{start}}-{{end}}/{{total}}",
     "paginationTotal": "共 {{total}} 条",
@@ -3213,6 +3214,21 @@
     "titlePlaceholder": "知识项标题",
     "contentLabel": "内容（Markdown格式）",
     "contentPlaceholder": "输入知识内容，支持Markdown格式..."
+  },
+  "continueFailedModal": {
+    "title": "继续失败的会话",
+    "hint": "以下会话的上一次执行因 API 调用失败而中断。点击「全部继续」将按队列顺序在后台逐个恢复执行；也可以单独继续某个会话。",
+    "empty": "没有因 API 调用失败而中断的会话。",
+    "loading": "加载中…",
+    "loadFailed": "加载失败会话列表出错",
+    "untitled": "未命名会话",
+    "failedAt": "失败时间",
+    "continueOne": "继续",
+    "continuing": "续跑中",
+    "queuedOne": "已加入后台续跑队列，可打开该会话查看进度。",
+    "queueFailed": "加入续跑队列失败",
+    "queuedAll": "已将 {{count}} 个失败会话加入后台续跑队列。",
+    "allSkipped": "没有可继续的会话（正在执行或已在队列中）。"
   },
   "batchManageModal": {
     "title": "管理对话记录·共{{count}}条",

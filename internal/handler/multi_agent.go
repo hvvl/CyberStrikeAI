@@ -165,6 +165,8 @@ func (h *AgentHandler) MultiAgentLoopStream(c *gin.Context) {
 		sendEvent("done", "", map[string]interface{}{"conversationId": conversationID})
 		return
 	}
+	// 跨通道 failover：跟踪本请求已尝试的通道，防止 fallback 链成环。
+	channelFailover := newChannelFailoverState(runCfg.AI.DefaultChannel)
 
 	var result *multiagent.RunResult
 	var runErr error
@@ -363,6 +365,13 @@ func (h *AgentHandler) MultiAgentLoopStream(c *gin.Context) {
 			return
 		}
 
+		// 临时错误重试耗尽 → 若配置了 fallback_channel，切换备用通道分段续跑。
+		if h.tryChannelFailover(runErr, &runCfg, channelFailover, conversationID, &curHistory, sendEvent) {
+			mainIterationOffset += segmentMainIterationMax
+			baseCtx, cancelWithCause, taskCtx, timeoutCancel = h.rebindForChannelFailover(taskCtx, conversationID, timeoutCancel)
+			continue
+		}
+
 		h.logger.Error("Eino DeepAgent 执行失败", zap.Error(runErr))
 		taskStatus = "failed"
 		h.tasks.UpdateTaskStatus(conversationID, taskStatus)
@@ -451,6 +460,8 @@ func (h *AgentHandler) MultiAgentLoop(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// 跨通道 failover：跟踪本请求已尝试的通道，防止 fallback 链成环。
+	channelFailover := newChannelFailoverState(runCfg.AI.DefaultChannel)
 
 	curHist := prep.History
 	curMsg := prep.FinalMessage
@@ -486,6 +497,10 @@ func (h *AgentHandler) MultiAgentLoop(c *gin.Context) {
 		if runErr != nil {
 			if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {
 				h.persistEinoAgentTraceForResume(prep.ConversationID, result)
+			}
+			// 临时错误重试耗尽 → 若配置了 fallback_channel，切换备用通道分段续跑。
+			if h.tryChannelFailover(runErr, &runCfg, channelFailover, prep.ConversationID, &curHist, progressCallback) {
+				continue
 			}
 			h.logger.Error("Eino DeepAgent 执行失败", zap.Error(runErr))
 			errMsg := "执行失败: " + runErr.Error()

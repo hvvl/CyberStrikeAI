@@ -977,6 +977,8 @@ func setupRoutes(
 		protected.PUT("/hitl/audit-strategy", agentHandler.UpdateHITLAuditStrategy)
 		// Agent Loop 取消与任务列表
 		protected.POST("/agent-loop/cancel", agentHandler.CancelAgentLoop)
+		protected.GET("/agent-loop/failed", agentHandler.ListFailedConversations)
+		protected.POST("/agent-loop/continue-failed", agentHandler.ContinueFailedConversations)
 		protected.GET("/agent-loop/tasks", agentHandler.ListAgentTasks)
 		protected.GET("/agent-loop/task-events", agentHandler.SubscribeAgentTaskEvents)
 		protected.GET("/agent-loop/tasks/completed", agentHandler.ListCompletedTasks)

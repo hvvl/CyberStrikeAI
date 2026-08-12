@@ -77,6 +77,13 @@ ai:
       max_completion_tokens: 32768
       # 该通道最大并发 LLM 请求数；0=不限制。按 token plan / agent plan 的并发额度设置，超出的请求排队等待。
       max_concurrency: 2
+      # 通道级重试参数（可选）：覆盖 eino_middleware.run_retry_max_attempts 全局默认。
+      # 0=用全局默认（默认 6 次，单次退避上限 30s，equal-jitter 指数退避）。
+      run_retry_max_attempts: 0
+      run_retry_max_backoff_sec: 0
+      # 重试耗尽后切换的备用通道名（可选，需与 channels 下的 key 对应；留空=不 failover）。
+      # handler 层会加载 agent trace 从断点续跑；防环：同一请求最多 fallback 一次。
+      fallback_channel: ""
       # 推理控制（可选）：mode auto|on|off；effort low|medium|high|max|xhigh；profile auto|deepseek_compat|openai_compat|output_config_effort
       reasoning:
         mode: "on"
@@ -326,7 +333,7 @@ multi_agent:
     plan_execute_max_step_result_runes: 4000 # plan_execute 每步结果最大字符数（超出截断）
     plan_execute_keep_last_steps: 8 # plan_execute 仅保留最近 N 步正文，早期步骤折叠为标题
     checkpoint_dir: data/eino-checkpoints # P0：进程崩溃/OOM 后同会话自动 ADK Resume；正常结束会删 .ckpt；与「中断并继续」(last_react_*) 是两套机制
-    run_retry_max_attempts: 0 # 408/409/425/429/5xx/网络抖动时可退避重试次数；0=默认 4（永久性 4xx 不重试）
+    run_retry_max_attempts: 0 # 408/409/425/429/5xx/网络抖动时可退避重试次数；0=默认 6（永久性 4xx 不重试）。可被通道级 run_retry_max_attempts 覆盖
     run_retry_max_backoff_sec: 0 # 单次退避上限秒数；0=默认 30
     empty_response_continue_max_attempts: 0 # Run 成功但未捕获助手正文（含流式中断）时 Handler 退避续跑次数；0=默认 5
     deep_output_key: final_answer # P0：Eino session 写入最终助手结论（框架内部；Deep/Supervisor 主/eino_single）

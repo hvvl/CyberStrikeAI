@@ -39,7 +39,8 @@ func buildLLMHTTPClient(oa *config.OpenAIConfig, channelID string, logger *zap.L
 	}
 	client := &http.Client{
 		Timeout:   30 * time.Minute,
-		Transport: channelLimiterTransport(channelID, oa.MaxConcurrency, base),
+		// Retry-After transport 在并发限流器外层：cooldown 等待期间不占用通道并发额度。
+		Transport: &retryAfterTransport{channelID: channelID, next: channelLimiterTransport(channelID, oa.MaxConcurrency, base)},
 	}
 	// 若配置为 Claude provider，注入自动桥接 transport，对 Eino 透明走 Anthropic Messages API
 	client = openai.NewEinoHTTPClient(oa, client)
