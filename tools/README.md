@@ -219,6 +219,12 @@ description: |
 - `dirb.yaml`: Web目录扫描工具
 - `exec.yaml`: 系统命令执行工具
 
+### 渗透效果增强工具（fork新增）
+
+- `interactsh.yaml`: OOB带外检测工具（blind XXE/SSRF/SQLi/RCE验证），基于interactsh session-file实现
+- `search_exploit.yaml`: 漏洞搜索工具（searchsploit本地库优先 → GitHub API fallback → Tavily/web_search）
+- `ocr_captcha.yaml`: 验证码OCR识别工具（基于ddddocr，识别简单字母数字验证码）
+
 ### 完整示例：nmap 工具配置
 
 ```yaml
