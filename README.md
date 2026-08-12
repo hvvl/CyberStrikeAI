@@ -4,8 +4,16 @@
 
 # CyberStrikeAI
 
-
 [中文](README_CN.md) | [English](README.md)
+
+> **🔧 Fork说明**: 本仓库为 [Ed1s0nZ/CyberStrikeAI](https://github.com/Ed1s0nZ/CyberStrikeAI) 的实战增强版，新增：
+> - **OOB带外检测**（interactsh session-file方案）
+> - **漏洞搜索三层递进**（searchsploit本地库 → GitHub API → Tavily/web_search）
+> - **验证码OCR**（ddddocr）
+> - **业务逻辑测试子Agent**（越权/未授权/逻辑绕过）
+> - **薄弱点评估矩阵**（决策路由优化）
+>
+> 知识库RAG默认关闭（改为实时搜索exploit）。
 
 **The system of action for AI-native cybersecurity—where intent becomes governed execution, evidence becomes operational memory, and every operation improves the next.**
 
