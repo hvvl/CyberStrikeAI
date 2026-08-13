@@ -2984,7 +2984,10 @@ function readBatchDispatchCsvFile(file) {
     const reader = new FileReader();
     reader.onload = function () {
         batchDispatchState.csvText = String(reader.result || '');
-        batchDispatchCsvSettingsChanged();
+        // 直接刷新解析结果，绝不回调 batchDispatchCsvSettingsChanged——
+        // 它会在 csvFile 存在时重读文件，形成无限循环。
+        refreshBatchDispatchPreview();
+        refreshBatchDispatchMappings();
     };
     reader.onerror = function () {
         alert(_t('batchDispatchModal.csvReadFailed'));
@@ -2992,13 +2995,16 @@ function readBatchDispatchCsvFile(file) {
     reader.readAsText(file, enc);
 }
 
-function batchDispatchCsvSettingsChanged() {
-    if (!batchDispatchState.csvText) return;
+function batchDispatchEncodingChanged() {
+    // 编码变化需要按新编码重新解码原始文件（仅此场景重读文件）。
     if (batchDispatchState.csvFile) {
-        // 编码变化 → 重读原始文件
         readBatchDispatchCsvFile(batchDispatchState.csvFile);
-        return;
     }
+}
+
+function batchDispatchCsvSettingsChanged() {
+    // 分隔符/忽略首行变化：只需按新设置重新解析当前已解码文本，不重读文件。
+    if (!batchDispatchState.csvText) return;
     refreshBatchDispatchPreview();
     refreshBatchDispatchMappings();
 }
@@ -3191,7 +3197,6 @@ function collectBatchDispatchPayload() {
     });
     const skipEl = document.getElementById('batch-csv-skip-header');
     const delimEl = document.getElementById('batch-csv-delimiter');
-    const encEl = document.getElementById('batch-csv-encoding');
     const modeEl = document.getElementById('batch-dispatch-mode');
     const execEl = document.getElementById('batch-dispatch-execute-now');
     const projectEl = document.getElementById('batch-dispatch-project-id');
@@ -3204,7 +3209,10 @@ function collectBatchDispatchPayload() {
             fileName: batchDispatchState.csvFile ? batchDispatchState.csvFile.name : '',
             delimiter: delimEl ? delimEl.value : ',',
             skipHeader: skipEl ? skipEl.checked : true,
-            encoding: encEl ? encEl.value : 'utf-8',
+            // 浏览器 FileReader.readAsText 已按所选编码解码为 Unicode 字符串，
+            // 服务端收到的是 UTF-8 JSON，必须声明 utf-8，否则 GBK 文件会被二次解码。
+            // 后端的 gbk 支持仅服务于 MCP/API 直接传入原始 GBK 字节字符串的场景。
+            encoding: 'utf-8',
             emptyCellPolicy: 'skip_row'
         },
         queues: queues,
@@ -3325,6 +3333,7 @@ window.switchBatchImportMode = switchBatchImportMode;
 window.submitBatchImport = submitBatchImport;
 window.handleBatchCsvFile = handleBatchCsvFile;
 window.batchDispatchCsvSettingsChanged = batchDispatchCsvSettingsChanged;
+window.batchDispatchEncodingChanged = batchDispatchEncodingChanged;
 window.refreshBatchDispatchMappings = refreshBatchDispatchMappings;
 window.batchDispatchMapColChanged = batchDispatchMapColChanged;
 window.addBatchDispatchQueueRow = addBatchDispatchQueueRow;
