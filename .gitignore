@@ -46,3 +46,6 @@ HANDOFF_CODE_REVIEW.md
 
 # Hermes agent workspace (local plans)
 .hermes/
+
+# playwright-cli browser automation artifacts
+.playwright-cli/

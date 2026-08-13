@@ -21168,6 +21168,39 @@ tr.mcp-stats-tool-row[data-tool-name]:focus-visible {
     flex-wrap: wrap;
 }
 
+.batch-dispatch-queue-head {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 2px 0 6px;
+    margin-top: 2px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.bq-head-cell {
+    flex: 1;
+    min-width: 90px;
+}
+
+.bq-head-cell--title {
+    flex: 2;
+    min-width: 140px;
+}
+
+.bq-head-cell--num {
+    flex: 0 0 64px;
+    min-width: 64px;
+    text-align: center;
+}
+
+.bq-head-spacer {
+    flex: 0 0 28px;
+    min-width: 28px;
+}
+
 .bq-plan-field {
     flex: 1;
     min-width: 90px;

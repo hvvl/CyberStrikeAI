@@ -6194,6 +6194,15 @@
                     </div>
                     <div class="form-group">
                         <label data-i18n="batchDispatchModal.queuePlans">派发队列（队列间并行，队列内按并发数执行）</label>
+                        <div class="batch-dispatch-queue-head">
+                            <span class="bq-head-cell bq-head-cell--title" data-i18n="batchDispatchModal.queueHeadTitle">队列标题</span>
+                            <span class="bq-head-cell" data-i18n="batchDispatchModal.queueHeadChannel">AI 通道</span>
+                            <span class="bq-head-cell" data-i18n="batchDispatchModal.queueHeadAgent">代理模式</span>
+                            <span class="bq-head-cell" data-i18n="batchDispatchModal.queueHeadRole">角色</span>
+                            <span class="bq-head-cell bq-head-cell--num" data-i18n="batchDispatchModal.queueHeadConcurrency">并发数</span>
+                            <span class="bq-head-cell bq-head-cell--num" data-i18n="batchDispatchModal.queueHeadTaskCap">任务上限</span>
+                            <span class="bq-head-spacer"></span>
+                        </div>
                         <div id="batch-dispatch-queues"></div>
                         <button type="button" class="btn-secondary" onclick="addBatchDispatchQueueRow()" data-i18n="batchDispatchModal.addQueue">+ 添加队列</button>
                         <div class="form-hint" style="margin-top: 4px;" data-i18n="batchDispatchModal.queuePlansHint">每个队列可独立指定 AI 通道 / 代理模式 / 角色；最多 16 个队列。</div>
