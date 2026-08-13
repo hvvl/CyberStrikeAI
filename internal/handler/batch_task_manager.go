@@ -184,7 +184,7 @@ func (m *BatchTaskManager) SetQueueGroup(queueID, groupID string) error {
 	m.mu.Unlock()
 	if m.db != nil {
 		if err := m.db.UpdateBatchQueueGroup(queueID, groupID); err != nil {
-			return fmt.Errorf("queue group 持久化失败: %w", err)
+			return fmt.Errorf("%w: queue group 持久化失败: %v", ErrBatchQueuePersist, err)
 		}
 	}
 	return nil
@@ -308,8 +308,20 @@ func (m *BatchTaskManager) GetBatchQueue(queueID string) (*BatchTaskQueue, bool)
 			return queue, true
 		}
 	}
-
 	return nil, false
+}
+
+// QueueStatus 加锁读取队列状态。组级 start/cancel 循环不能无锁读共享指针的
+// Status 字段（执行协程在 m.mu 内并发写），否则是数据竞争（审计四轮 #1）。
+// 调用方通常先 GetBatchQueue（触发懒加载）再读状态。
+func (m *BatchTaskManager) QueueStatus(queueID string) (string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	q, ok := m.queues[queueID]
+	if !ok {
+		return "", false
+	}
+	return q.Status, true
 }
 
 // loadQueueFromDB 从数据库加载单个队列

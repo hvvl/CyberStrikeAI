@@ -5,8 +5,10 @@ import (
 	"testing"
 )
 
+func boolPtr(b bool) *bool { return &b }
+
 func TestParseBatchCSVBasic(t *testing.T) {
-	csv := &BatchDispatchCSV{Content: "a,b\n1,2\n3,4\n", SkipHeader: true}
+	csv := &BatchDispatchCSV{Content: "a,b\n1,2\n3,4\n", SkipHeader: boolPtr(true)}
 	rows, err := parseBatchCSV(csv)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -17,7 +19,7 @@ func TestParseBatchCSVBasic(t *testing.T) {
 }
 
 func TestParseBatchCSVQuotedComma(t *testing.T) {
-	csv := &BatchDispatchCSV{Content: "h1,h2\n\"a,b\",\"c\"\n", SkipHeader: true}
+	csv := &BatchDispatchCSV{Content: "h1,h2\n\"a,b\",\"c\"\n", SkipHeader: boolPtr(true)}
 	rows, err := parseBatchCSV(csv)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -198,7 +200,7 @@ func TestDistributeTooManyQueues(t *testing.T) {
 
 func TestDistributeDefaultModeIsBlock(t *testing.T) {
 	req := &BatchDispatchRequest{
-		CSV:   BatchDispatchCSV{Content: "x"},
+		CSV:    BatchDispatchCSV{Content: "x"},
 		Queues: []BatchDispatchQueuePlan{{}},
 	}
 	normalizeBatchDispatch(req)
@@ -207,6 +209,15 @@ func TestDistributeDefaultModeIsBlock(t *testing.T) {
 	}
 	if req.CSV.Delimiter != "," || req.CSV.Encoding != "utf-8" || req.CSV.EmptyCellPolicy != "skip_row" {
 		t.Fatalf("defaults wrong: %+v", req.CSV)
+	}
+	// 审计四轮 #5：HTTP 漏传 skipHeader 时默认 true（忽略表头），与 MCP 入口一致。
+	if req.CSV.SkipHeader == nil || !*req.CSV.SkipHeader {
+		t.Fatalf("skipHeader default must be true, got %v", req.CSV.SkipHeader)
+	}
+	explicit := &BatchDispatchRequest{CSV: BatchDispatchCSV{SkipHeader: boolPtr(false)}}
+	normalizeBatchDispatch(explicit)
+	if explicit.CSV.SkipHeader == nil || *explicit.CSV.SkipHeader {
+		t.Fatalf("explicit skipHeader=false must be preserved")
 	}
 	if req.Queues[0].Concurrency != 1 {
 		t.Fatalf("concurrency default wrong: %d", req.Queues[0].Concurrency)

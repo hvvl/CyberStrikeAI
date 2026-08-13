@@ -159,6 +159,13 @@ func (h *AgentHandler) MultiAgentLoopStream(c *gin.Context) {
 
 	stopKeepalive := runSSEKeepalive(c, &sseWriteMu)
 	defer stopKeepalive()
+	// 通道存在性校验（审计四轮 #7：与批量/派发路径一致；无效 aiChannelId 显式报错，
+	// 而不是静默用全局默认模型顶替——模型/供应商/成本都可能完全不同）。
+	if verr := h.validateAIChannelExists(req.AIChannelID); verr != nil {
+		sendEvent("error", verr.Error(), nil)
+		sendEvent("done", "", map[string]interface{}{"conversationId": conversationID})
+		return
+	}
 	runCfg, resolvedAIChannelID, err := h.configForAIChannel(req.AIChannelID)
 	if err != nil {
 		sendEvent("error", err.Error(), nil)
@@ -457,6 +464,11 @@ func (h *AgentHandler) MultiAgentLoop(c *gin.Context) {
 	taskCtx = multiagent.WithHITLToolInterceptor(taskCtx, func(ctx context.Context, toolName, arguments string) (string, error) {
 		return h.interceptHITLForEinoTool(ctx, cancelWithCause, prep.ConversationID, prep.AssistantMessageID, nil, toolName, arguments)
 	})
+	// 通道存在性校验（审计四轮 #7：与批量/派发路径一致）。
+	if verr := h.validateAIChannelExists(req.AIChannelID); verr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": verr.Error()})
+		return
+	}
 	runCfg, resolvedAIChannelID, err := h.configForAIChannel(req.AIChannelID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

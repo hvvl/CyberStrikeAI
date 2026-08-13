@@ -1487,11 +1487,12 @@ func (db *DB) migrateBatchTaskQueuesTable() error {
 	} else if batchGroupIDCount == 0 {
 		if _, err := db.Exec("ALTER TABLE batch_task_queues ADD COLUMN batch_group_id TEXT"); err != nil {
 			db.logger.Warn("添加batch_task_queues.batch_group_id字段失败", zap.Error(err))
-		} else {
-			if _, idxErr := db.Exec("CREATE INDEX IF NOT EXISTS idx_batch_task_queues_group ON batch_task_queues(batch_group_id)"); idxErr != nil {
-				db.logger.Warn("创建batch_task_queues.batch_group_id索引失败", zap.Error(idxErr))
-			}
 		}
+	}
+	// 索引无条件创建（审计四轮 #4）：此前只放在「老库 ALTER 列成功」分支里，
+	// 新库 DDL 已含该列会跳过整个分支 → 新库永远没有按组查询的索引，全表扫描。
+	if _, idxErr := db.Exec("CREATE INDEX IF NOT EXISTS idx_batch_task_queues_group ON batch_task_queues(batch_group_id)"); idxErr != nil {
+		db.logger.Warn("创建batch_task_queues.batch_group_id索引失败", zap.Error(idxErr))
 	}
 
 	return nil

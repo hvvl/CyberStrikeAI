@@ -150,6 +150,14 @@ func (h *AgentHandler) EinoSingleAgentLoopStream(c *gin.Context) {
 		sendEvent("done", "", map[string]interface{}{"conversationId": conversationID})
 		return
 	}
+	// 通道存在性校验（审计四轮 #7：与批量/派发路径一致）。
+	if verr := h.validateAIChannelExists(req.AIChannelID); verr != nil {
+		taskStatus = "failed"
+		h.tasks.UpdateTaskStatus(conversationID, taskStatus)
+		sendEvent("error", verr.Error(), nil)
+		sendEvent("done", "", map[string]interface{}{"conversationId": conversationID})
+		return
+	}
 	runCfg, resolvedAIChannelID, err := h.configForAIChannel(req.AIChannelID)
 	if err != nil {
 		taskStatus = "failed"
@@ -445,6 +453,11 @@ func (h *AgentHandler) EinoSingleAgentLoop(c *gin.Context) {
 
 	if h.config == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器配置未加载"})
+		return
+	}
+	// 通道存在性校验（审计四轮 #7：与批量/派发路径一致）。
+	if verr := h.validateAIChannelExists(req.AIChannelID); verr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": verr.Error()})
 		return
 	}
 	runCfg, resolvedAIChannelID, err := h.configForAIChannel(req.AIChannelID)

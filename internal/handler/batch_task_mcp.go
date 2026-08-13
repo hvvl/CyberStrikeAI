@@ -781,9 +781,10 @@ schedule_mode 为 cron 时必须提供有效 cron_expr；为 manual 时会清除
 			req.DistributeMode = v
 		}
 		if v, ok := mcpArgBool(args, "skip_header"); ok {
-			req.CSV.SkipHeader = v
+			req.CSV.SkipHeader = &v
 		} else {
-			req.CSV.SkipHeader = true
+			t := true
+			req.CSV.SkipHeader = &t
 		}
 		executeNow, ok := mcpArgBool(args, "execute_now")
 		if !ok {

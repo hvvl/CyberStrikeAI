@@ -610,7 +610,7 @@ func (db *DB) DeleteBatchTask(queueID, taskID string) error {
 	return nil
 }
 
-// DeleteBatchQueue 删除批量任务队列
+// DeleteBatchQueue 删除批量任务队列（含任务、RBAC 资源分配）。
 func (db *DB) DeleteBatchQueue(queueID string) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -628,6 +628,12 @@ func (db *DB) DeleteBatchQueue(queueID string) error {
 	_, err = tx.Exec("DELETE FROM batch_task_queues WHERE id = ?", queueID)
 	if err != nil {
 		return fmt.Errorf("删除批量任务队列失败: %w", err)
+	}
+
+	// 清除 RBAC 资源分配（多态关联无外键级联，不清理会留孤儿记录；审计四轮 #3）。
+	_, err = tx.Exec(`DELETE FROM rbac_resource_assignments WHERE resource_type = 'batch_task' AND resource_id = ?`, queueID)
+	if err != nil {
+		return fmt.Errorf("删除批量队列资源分配失败: %w", err)
 	}
 
 	return tx.Commit()
@@ -649,7 +655,9 @@ func (db *DB) ListBatchQueueIDsByGroup(groupID string) ([]string, error) {
 		}
 		ids = append(ids, id)
 	}
-	return ids, nil
+	// rows.Err() 必须检查：迭代中途出错时返回「部分 ids + nil error」，
+	// 会绕过组级 RBAC 全有或全无校验（审计四轮 #2）。
+	return ids, rows.Err()
 }
 
 // UpdateBatchQueueGroup 设置队列所属派发组。

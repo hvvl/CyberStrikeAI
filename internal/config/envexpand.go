@@ -51,16 +51,31 @@ func expandEnvVar(s string) string {
 
 // ExpandConfigEnv 展开 ExternalMCPServerConfig 中所有支持环境变量的字段。
 // 展开范围：Command、Args、Env values、URL、Headers values。
+// 注意：copy-on-write——Args/Env/Headers 全部重建为新的底层容器后再写，
+// 不原地改写元素。调用方可能在存储本配置的同时已有懒加载 SDK 协程并发读
+// 同一底层数组（exec.Command 会 slicecopy），原地写会触发数据竞争（-race 实测）。
 func ExpandConfigEnv(cfg *ExternalMCPServerConfig) {
 	cfg.Command = expandEnvVar(cfg.Command)
-	for i, arg := range cfg.Args {
-		cfg.Args[i] = expandEnvVar(arg)
+	if len(cfg.Args) > 0 {
+		args := make([]string, len(cfg.Args))
+		for i, arg := range cfg.Args {
+			args[i] = expandEnvVar(arg)
+		}
+		cfg.Args = args
 	}
-	for k, v := range cfg.Env {
-		cfg.Env[k] = expandEnvVar(v)
+	if len(cfg.Env) > 0 {
+		env := make(map[string]string, len(cfg.Env))
+		for k, v := range cfg.Env {
+			env[k] = expandEnvVar(v)
+		}
+		cfg.Env = env
 	}
 	cfg.URL = expandEnvVar(cfg.URL)
-	for k, v := range cfg.Headers {
-		cfg.Headers[k] = expandEnvVar(v)
+	if len(cfg.Headers) > 0 {
+		headers := make(map[string]string, len(cfg.Headers))
+		for k, v := range cfg.Headers {
+			headers[k] = expandEnvVar(v)
+		}
+		cfg.Headers = headers
 	}
 }

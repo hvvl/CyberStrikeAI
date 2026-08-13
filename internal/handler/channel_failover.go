@@ -181,23 +181,17 @@ func (h *AgentHandler) tryChannelFailover(
 			}
 			return false
 		}
-		// 注入运行时通道别名：失败通道 → 备用通道。
-		// 会话通道本身已通过 runCfg.OpenAI 替换完成切换；别名主要服务
-		// Agent Markdown 中显式绑定失败通道的子代理/主代理。
+		// 注入运行时通道别名：失败通道 → 备用通道（防御性深拷贝，与角色分支对称——
+		// configForAIChannel 是浅拷贝，其 ChannelAliases 理论上可能指向全局 map，
+		// 直接写会污染全局；当前全局恒 nil 不爆发，但显式拷贝消除隐含前提）。
+		aliases := make(map[string]string, len(cur.AI.ChannelAliases)+1)
+		for k, v := range cur.AI.ChannelAliases {
+			aliases[k] = v
+		}
 		if failedID != resolvedID {
-			if newCfg.AI.ChannelAliases == nil {
-				newCfg.AI.ChannelAliases = make(map[string]string)
-			}
-			newCfg.AI.ChannelAliases[failedID] = resolvedID
+			aliases[failedID] = resolvedID
 		}
-		// 保留既有别名（理论上 switched 限一次，但防御性合并）。
-		if len(cur.AI.ChannelAliases) > 0 {
-			for k, v := range cur.AI.ChannelAliases {
-				if _, exists := newCfg.AI.ChannelAliases[k]; !exists {
-					newCfg.AI.ChannelAliases[k] = v
-				}
-			}
-		}
+		newCfg.AI.ChannelAliases = aliases
 	}
 
 	// 从已持久化的代理轨迹重建历史，保留切换前的上下文。

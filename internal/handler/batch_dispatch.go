@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -42,8 +43,8 @@ type BatchDispatchPlaceholder struct {
 type BatchDispatchCSV struct {
 	Content         string `json:"content"`
 	FileName        string `json:"fileName,omitempty"`
-	Delimiter       string `json:"delimiter,omitempty"` // "," | ";" | "\t"
-	SkipHeader      bool   `json:"skipHeader"`
+	Delimiter       string `json:"delimiter,omitempty"`       // "," | ";" | "	"
+	SkipHeader      *bool  `json:"skipHeader"`                // nil=默认忽略表头（与 MCP 一致）；显式 false 才把表头当数据
 	Encoding        string `json:"encoding,omitempty"`        // utf-8 | gbk
 	EmptyCellPolicy string `json:"emptyCellPolicy,omitempty"` // skip_row | keep
 }
@@ -85,7 +86,8 @@ type BatchDispatchResponse struct {
 	Queues      []BatchDispatchQueueResult `json:"queues"`
 }
 
-// normalizeBatchDispatch 填充默认值：delimiter=,、encoding=utf-8、policy=skip_row、mode=block；
+// normalizeBatchDispatch 填充默认值：delimiter=,、encoding=utf-8、policy=skip_row、mode=block、
+// skip_header=true（审计四轮 #5：与 MCP 入口默认一致，避免 HTTP 漏传时把表头当数据行）；
 // 队列并发数规范化、AgentMode 归一化。
 func normalizeBatchDispatch(req *BatchDispatchRequest) {
 	if req.CSV.Delimiter == "" {
@@ -96,6 +98,10 @@ func normalizeBatchDispatch(req *BatchDispatchRequest) {
 	}
 	if req.CSV.EmptyCellPolicy == "" {
 		req.CSV.EmptyCellPolicy = "skip_row"
+	}
+	if req.CSV.SkipHeader == nil {
+		t := true
+		req.CSV.SkipHeader = &t
 	}
 	if req.DistributeMode == "" {
 		req.DistributeMode = "block"
@@ -124,6 +130,8 @@ func validateBatchDispatch(req *BatchDispatchRequest) error {
 }
 
 // parseBatchCSV 解析 CSV 内容为二维数组（若 SkipHeader 则去掉首行）。
+// 注意：SkipHeader==nil 视为不忽略（默认值由 normalizeBatchDispatch 在派发入口填充，
+// 直接调用本函数做解析测试时不做任何隐式默认）。
 func parseBatchCSV(c *BatchDispatchCSV) ([][]string, error) {
 	if len(c.Content) > MaxBatchDispatchCSVBytes {
 		return nil, fmt.Errorf("CSV 内容超过 %dMB 上限", MaxBatchDispatchCSVBytes>>20)
@@ -150,7 +158,7 @@ func parseBatchCSV(c *BatchDispatchCSV) ([][]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("CSV 解析失败: %w", err)
 	}
-	if c.SkipHeader && len(all) > 0 {
+	if c.SkipHeader != nil && *c.SkipHeader && len(all) > 0 {
 		all = all[1:]
 	}
 	if len(all) > MaxBatchDispatchRows {
@@ -358,13 +366,23 @@ func (h *AgentHandler) buildBatchDispatch(req *BatchDispatchRequest, userID stri
 		return nil, reason
 	}
 
-	// 第一步：全部创建（不启动）。
+	// 第一步：全部创建（不启动）。空队列跳过（审计四轮 #8：round_robin 消息数少于
+	// 队列数、或 block 均分余数不足时会产生 0 任务队列，创建空队列只会污染 UI 与审计）。
 	for i, plan := range req.Queues {
+		if len(perQueue[i]) == 0 {
+			if h.logger != nil {
+				h.logger.Info("批量派发跳过空队列", zap.Int("queueIndex", i+1), zap.String("title", queueTitles[i]))
+			}
+			continue
+		}
 		queue, createErr := h.batchTaskManager.CreateBatchQueue(queueTitles[i], plan.Role, plan.AgentMode, "manual", "", req.ProjectID, plan.AIChannelID, nil, plan.Concurrency, perQueue[i])
 		if createErr != nil {
 			return rollback(fmt.Errorf("创建队列 %d 失败: %w", i+1, createErr))
 		}
 		created = append(created, queue)
+	}
+	if len(created) == 0 {
+		return nil, fmt.Errorf("所有队列均为空，无任务可派发")
 	}
 	// 第二步：落组 + 落 owner（全部成功后才进入启动阶段；任一步失败回滚已创建队列，审计 P2/P3-7）。
 	for _, q := range created {
@@ -375,11 +393,11 @@ func (h *AgentHandler) buildBatchDispatch(req *BatchDispatchRequest, userID stri
 		if h.db != nil && userID != "" {
 			if err := h.db.SetResourceOwner("batch_task", q.ID, userID); err != nil {
 				h.logger.Error("批量派发 owner 持久化失败，回滚", zap.String("queueId", q.ID), zap.Error(err))
-				return rollback(fmt.Errorf("队列 %s owner 持久化失败: %w", q.ID, err))
+				return rollback(fmt.Errorf("%w: 队列 %s owner 持久化失败: %v", ErrBatchQueuePersist, q.ID, err))
 			}
 			if err := h.db.AssignResourceToUser(userID, "batch_task", q.ID); err != nil {
 				h.logger.Error("批量派发用户分配持久化失败，回滚", zap.String("queueId", q.ID), zap.Error(err))
-				return rollback(fmt.Errorf("队列 %s 用户分配持久化失败: %w", q.ID, err))
+				return rollback(fmt.Errorf("%w: 队列 %s 用户分配持久化失败: %v", ErrBatchQueuePersist, q.ID, err))
 			}
 		}
 	}
@@ -417,7 +435,13 @@ func (h *AgentHandler) DispatchBatchTasks(c *gin.Context) {
 	}
 	resp, err := h.buildBatchDispatch(&req, userID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		// 审计四轮 #6：持久化类失败（落组/owner/队列 DB 写）是服务端故障，返回 500
+		// 而非 400，避免前端把「输入错误」与「服务器故障」混为一谈。
+		if errors.Is(err, ErrBatchQueuePersist) {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		}
 		return
 	}
 	if h.audit != nil {
@@ -463,11 +487,13 @@ func (h *AgentHandler) StartBatchGroup(c *gin.Context) {
 	}
 	started := 0
 	for _, id := range ids {
-		if q, ok := h.batchTaskManager.GetBatchQueue(id); ok {
-			if q.Status == BatchQueueStatusPending || q.Status == BatchQueueStatusPaused {
-				h.batchTaskManager.ClearSingleRunTask(id)
-				if ok, startErr := h.startBatchQueueExecution(id, false); ok && startErr == nil {
-					started++
+		if _, ok := h.batchTaskManager.GetBatchQueue(id); ok {
+			if st, ok := h.batchTaskManager.QueueStatus(id); ok {
+				if st == BatchQueueStatusPending || st == BatchQueueStatusPaused {
+					h.batchTaskManager.ClearSingleRunTask(id)
+					if ok, startErr := h.startBatchQueueExecution(id, false); ok && startErr == nil {
+						started++
+					}
 				}
 			}
 		}
@@ -492,10 +518,12 @@ func (h *AgentHandler) CancelBatchGroup(c *gin.Context) {
 	}
 	cancelled := 0
 	for _, id := range ids {
-		if q, ok := h.batchTaskManager.GetBatchQueue(id); ok {
-			if q.Status == BatchQueueStatusRunning || q.Status == BatchQueueStatusPaused {
-				if h.batchTaskManager.CancelQueue(id) {
-					cancelled++
+		if _, ok := h.batchTaskManager.GetBatchQueue(id); ok {
+			if st, ok := h.batchTaskManager.QueueStatus(id); ok {
+				if st == BatchQueueStatusRunning || st == BatchQueueStatusPaused {
+					if h.batchTaskManager.CancelQueue(id) {
+						cancelled++
+					}
 				}
 			}
 		}
