@@ -295,6 +295,8 @@ func distributeBatchMessages(msgs []string, plans []BatchDispatchQueuePlan, mode
 }
 
 // buildBatchDispatch 从请求构造派发结果：解析 CSV → 渲染 → 分发 → 创建队列（供 HTTP 与 MCP 共用）。
+// 原子性保证：先对全部队列计划做预校验，再统一创建；任一创建失败时补偿删除已建队列；
+// 全部创建并落组/落 owner 成功后才统一启动，避免「返回失败但已有队列在跑」的中间态。
 func (h *AgentHandler) buildBatchDispatch(req *BatchDispatchRequest, userID string) (*BatchDispatchResponse, error) {
 	normalizeBatchDispatch(req)
 	if err := validateBatchDispatch(req); err != nil {
@@ -317,8 +319,8 @@ func (h *AgentHandler) buildBatchDispatch(req *BatchDispatchRequest, userID stri
 		return nil, err
 	}
 
-	groupID := generateShortID()
-	resp := &BatchDispatchResponse{GroupID: groupID, TotalTasks: len(msgs), SkippedRows: skipped}
+	// 预校验：按与 CreateBatchQueue 相同的上限检查，避免创建到一半才发现参数非法。
+	queueTitles := make([]string, len(req.Queues))
 	for i, plan := range req.Queues {
 		qTitle := strings.TrimSpace(plan.Title)
 		if qTitle == "" {
@@ -328,20 +330,50 @@ func (h *AgentHandler) buildBatchDispatch(req *BatchDispatchRequest, userID stri
 			}
 			qTitle = fmt.Sprintf("%s #%d", base, i+1)
 		}
-		queue, createErr := h.batchTaskManager.CreateBatchQueue(qTitle, plan.Role, plan.AgentMode, "manual", "", req.ProjectID, plan.AIChannelID, nil, plan.Concurrency, perQueue[i])
+		if utf8.RuneCountInString(qTitle) > MaxBatchQueueTitleLen {
+			return nil, fmt.Errorf("队列 %d 标题不能超过 %d 个字符", i+1, MaxBatchQueueTitleLen)
+		}
+		if utf8.RuneCountInString(plan.Role) > MaxBatchQueueRoleLen {
+			return nil, fmt.Errorf("队列 %d 角色名不能超过 %d 个字符", i+1, MaxBatchQueueRoleLen)
+		}
+		if len(perQueue[i]) > MaxBatchTasksPerQueue {
+			return nil, fmt.Errorf("队列 %d 任务数 %d 超过单队列上限 %d", i+1, len(perQueue[i]), MaxBatchTasksPerQueue)
+		}
+		queueTitles[i] = qTitle
+	}
+
+	groupID := generateShortID()
+	resp := &BatchDispatchResponse{GroupID: groupID, TotalTasks: len(msgs), SkippedRows: skipped}
+	created := make([]*BatchTaskQueue, 0, len(req.Queues))
+	// 失败补偿：删除本次已创建的队列（此时尚未启动，DeleteQueue 不会被执行器拒绝）。
+	rollback := func(reason error) (*BatchDispatchResponse, error) {
+		for _, q := range created {
+			_ = h.batchTaskManager.DeleteQueue(q.ID)
+		}
+		return nil, reason
+	}
+
+	// 第一步：全部创建（不启动）。
+	for i, plan := range req.Queues {
+		queue, createErr := h.batchTaskManager.CreateBatchQueue(queueTitles[i], plan.Role, plan.AgentMode, "manual", "", req.ProjectID, plan.AIChannelID, nil, plan.Concurrency, perQueue[i])
 		if createErr != nil {
-			return nil, fmt.Errorf("创建队列 %d 失败: %w", i+1, createErr)
+			return rollback(fmt.Errorf("创建队列 %d 失败: %w", i+1, createErr))
 		}
-		h.batchTaskManager.SetQueueGroup(queue.ID, groupID)
-		if h.db != nil {
-			if userID != "" {
-				_ = h.db.SetResourceOwner("batch_task", queue.ID, userID)
-				_ = h.db.AssignResourceToUser(userID, "batch_task", queue.ID)
-			}
+		created = append(created, queue)
+	}
+	// 第二步：落组 + 落 owner（全部成功后才进入启动阶段）。
+	for _, q := range created {
+		h.batchTaskManager.SetQueueGroup(q.ID, groupID)
+		if h.db != nil && userID != "" {
+			_ = h.db.SetResourceOwner("batch_task", q.ID, userID)
+			_ = h.db.AssignResourceToUser(userID, "batch_task", q.ID)
 		}
-		item := BatchDispatchQueueResult{QueueID: queue.ID, TaskCount: len(queue.Tasks), Started: false}
+	}
+	// 第三步：统一启动。
+	for _, q := range created {
+		item := BatchDispatchQueueResult{QueueID: q.ID, TaskCount: len(q.Tasks), Started: false}
 		if req.ExecuteNow {
-			ok, startErr := h.startBatchQueueExecution(queue.ID, false)
+			ok, startErr := h.startBatchQueueExecution(q.ID, false)
 			if ok && startErr == nil {
 				item.Started = true
 			}
@@ -382,12 +414,37 @@ func (h *AgentHandler) DispatchBatchTasks(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// checkBatchGroupAccess 校验当前会话对派发组内所有队列的资源访问权（全有或全无，
+// 避免部分启动/部分取消，也避免借响应计数探测他人资源）。返回 true 表示通过。
+func (h *AgentHandler) checkBatchGroupAccess(c *gin.Context, ids []string) bool {
+	if h.db == nil {
+		return true
+	}
+	session, ok := security.CurrentSession(c)
+	if !ok {
+		return true
+	}
+	if session.Scope == database.RBACScopeAll {
+		return true
+	}
+	for _, id := range ids {
+		if !h.db.UserCanAccessResource(session.UserID, session.Scope, "batch_task", id) {
+			return false
+		}
+	}
+	return true
+}
+
 // StartBatchGroup 启动派发组内所有 pending/paused 队列。
 func (h *AgentHandler) StartBatchGroup(c *gin.Context) {
 	groupID := c.Param("groupId")
 	ids, err := h.db.ListBatchQueueIDsByGroup(groupID)
 	if err != nil || len(ids) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "派发组不存在或无队列"})
+		return
+	}
+	if !h.checkBatchGroupAccess(c, ids) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权操作该派发组"})
 		return
 	}
 	started := 0
@@ -401,6 +458,9 @@ func (h *AgentHandler) StartBatchGroup(c *gin.Context) {
 			}
 		}
 	}
+	if h.audit != nil {
+		h.audit.RecordOK(c, "task", "start_group", "启动批量派发组", "batch_group", groupID, map[string]interface{}{"started": started, "total": len(ids)})
+	}
 	c.JSON(http.StatusOK, gin.H{"groupId": groupID, "started": started})
 }
 
@@ -412,6 +472,10 @@ func (h *AgentHandler) CancelBatchGroup(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "派发组不存在或无队列"})
 		return
 	}
+	if !h.checkBatchGroupAccess(c, ids) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权操作该派发组"})
+		return
+	}
 	cancelled := 0
 	for _, id := range ids {
 		if q, ok := h.batchTaskManager.GetBatchQueue(id); ok {
@@ -421,6 +485,9 @@ func (h *AgentHandler) CancelBatchGroup(c *gin.Context) {
 				}
 			}
 		}
+	}
+	if h.audit != nil {
+		h.audit.RecordOK(c, "task", "cancel_group", "取消批量派发组", "batch_group", groupID, map[string]interface{}{"cancelled": cancelled, "total": len(ids)})
 	}
 	c.JSON(http.StatusOK, gin.H{"groupId": groupID, "cancelled": cancelled})
 }
