@@ -83,6 +83,7 @@ type BatchTaskQueue struct {
 	LastScheduleError     string       `json:"lastScheduleError,omitempty"`
 	LastRunError          string       `json:"lastRunError,omitempty"`
 	ProjectID             string       `json:"projectId,omitempty"`
+	AIChannelID           string       `json:"aiChannelId,omitempty"` // 队列绑定的 AI 通道 ID（空=跟随全局默认）
 	Concurrency           int          `json:"concurrency"` // 同时执行的子任务数，默认 1
 	Tasks                 []*BatchTask `json:"tasks"`
 	Status                string       `json:"status"` // pending, running, paused, completed, cancelled
@@ -181,7 +182,7 @@ func normalizeBatchQueueConcurrency(n int) int {
 
 // CreateBatchQueue 创建批量任务队列
 func (m *BatchTaskManager) CreateBatchQueue(
-	title, role, agentMode, scheduleMode, cronExpr, projectID string,
+	title, role, agentMode, scheduleMode, cronExpr, projectID, aiChannelID string,
 	nextRunAt *time.Time,
 	concurrency int,
 	tasks []string,
@@ -206,6 +207,7 @@ func (m *BatchTaskManager) CreateBatchQueue(
 		Title:           title,
 		Role:            role,
 		ProjectID:       strings.TrimSpace(projectID),
+		AIChannelID:     strings.TrimSpace(aiChannelID),
 		AgentMode:       config.NormalizeAgentMode(agentMode),
 		ScheduleMode:    normalizeBatchQueueScheduleMode(scheduleMode),
 		CronExpr:        strings.TrimSpace(cronExpr),
@@ -254,6 +256,7 @@ func (m *BatchTaskManager) CreateBatchQueue(
 			queue.NextRunAt,
 			queue.ProjectID,
 			queue.Concurrency,
+			queue.AIChannelID,
 			dbTasks,
 		); err != nil {
 			m.logger.Warn("batch queue DB create failed", zap.String("queueId", queueID), zap.Error(err))
@@ -348,6 +351,9 @@ func (m *BatchTaskManager) loadQueueFromDB(queueID string) *BatchTaskQueue {
 	}
 	if queueRow.ProjectID.Valid {
 		queue.ProjectID = strings.TrimSpace(queueRow.ProjectID.String)
+	}
+	if queueRow.AIChannelID.Valid {
+		queue.AIChannelID = strings.TrimSpace(queueRow.AIChannelID.String)
 	}
 	queue.Concurrency = batchQueueConcurrencyFromRow(queueRow)
 	if queueRow.StartedAt.Valid {
@@ -592,6 +598,9 @@ func (m *BatchTaskManager) LoadFromDB() error {
 		}
 		if queueRow.ProjectID.Valid {
 			queue.ProjectID = strings.TrimSpace(queueRow.ProjectID.String)
+		}
+		if queueRow.AIChannelID.Valid {
+			queue.AIChannelID = strings.TrimSpace(queueRow.AIChannelID.String)
 		}
 		queue.Concurrency = batchQueueConcurrencyFromRow(queueRow)
 		if queueRow.StartedAt.Valid {

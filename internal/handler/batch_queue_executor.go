@@ -244,16 +244,27 @@ func (h *AgentHandler) executeOneBatchSubTask(queueID string, queue *BatchTaskQu
 		_ = h.db.SetConversationAgentMode(conversationID, "eino_single")
 	}
 
+	// 按队列绑定的 AI 通道解析配置（空=跟随全局默认通道）。
+	runCfg := h.config
+	if chID := strings.TrimSpace(queue.AIChannelID); chID != "" {
+		if cfg, _, err := h.configForAIChannel(chID); err == nil && cfg != nil {
+			runCfg = cfg
+		} else if h.logger != nil {
+			h.logger.Warn("batch queue AI 通道解析失败，回退默认通道",
+				zap.String("queueId", queue.ID), zap.String("aiChannelId", chID), zap.Error(err))
+		}
+	}
+
 	var resultMA *multiagent.RunResult
 	var runErr error
 	switch {
 	case useBatchMulti:
-		resultMA, runErr = multiagent.RunDeepAgent(taskCtx, h.config, &h.config.MultiAgent, h.agent, h.db, h.logger, conversationID, h.conversationProjectID(conversationID), finalMessage, []agent.ChatMessage{}, roleTools, progressCallback, h.agentsMarkdownDir, batchOrch, nil, h.agentSessionContextBlock(conversationID))
+		resultMA, runErr = multiagent.RunDeepAgent(taskCtx, runCfg, &runCfg.MultiAgent, h.agent, h.db, h.logger, conversationID, h.conversationProjectID(conversationID), finalMessage, []agent.ChatMessage{}, roleTools, progressCallback, h.agentsMarkdownDir, batchOrch, nil, h.agentSessionContextBlock(conversationID))
 	default:
-		if h.config == nil {
+		if runCfg == nil {
 			runErr = fmt.Errorf("服务器配置未加载")
 		} else {
-			resultMA, runErr = multiagent.RunEinoSingleChatModelAgent(taskCtx, h.config, &h.config.MultiAgent, h.agent, h.db, h.logger, conversationID, h.conversationProjectID(conversationID), finalMessage, []agent.ChatMessage{}, roleTools, progressCallback, nil, h.agentSessionContextBlock(conversationID))
+			resultMA, runErr = multiagent.RunEinoSingleChatModelAgent(taskCtx, runCfg, &runCfg.MultiAgent, h.agent, h.db, h.logger, conversationID, h.conversationProjectID(conversationID), finalMessage, []agent.ChatMessage{}, roleTools, progressCallback, nil, h.agentSessionContextBlock(conversationID))
 		}
 	}
 

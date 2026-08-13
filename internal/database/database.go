@@ -474,7 +474,8 @@ func (db *DB) initTables() error {
 		created_at DATETIME NOT NULL,
 		started_at DATETIME,
 		completed_at DATETIME,
-		current_index INTEGER NOT NULL DEFAULT 0
+		current_index INTEGER NOT NULL DEFAULT 0,
+		ai_channel_id TEXT
 	);`
 
 	// 创建批量任务表

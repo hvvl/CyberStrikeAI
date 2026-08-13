@@ -6104,6 +6104,13 @@
                     <div class="form-hint" style="margin-top: 4px;" data-i18n="batchImportModal.agentModeHint">与对话页一致：Eino 单代理（ADK），或 Deep / Plan-Execute / Supervisor（后三种需已启用多代理）。</div>
                 </div>
                 <div class="form-group">
+                    <label for="batch-queue-ai-channel" data-i18n="batchImportModal.aiChannel">AI 通道</label>
+                    <select id="batch-queue-ai-channel">
+                        <option value="" data-i18n="batchImportModal.aiChannelDefault">默认（跟随全局）</option>
+                    </select>
+                    <div class="form-hint" style="margin-top: 4px;" data-i18n="batchImportModal.aiChannelHint">为该队列指定 AI 通道（模型/密钥/并发额度），不同队列可用不同通道。留空则跟随全局默认通道。</div>
+                </div>
+                <div class="form-group">
                     <label for="batch-queue-concurrency" data-i18n="batchImportModal.concurrency">并发数</label>
                     <input type="number" id="batch-queue-concurrency" min="1" max="8" value="1" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.875rem;" />
                     <div class="form-hint" style="margin-top: 4px;" data-i18n="batchImportModal.concurrencyHint">同时执行的子任务数量（1-8）。默认 1 为串行；含扫描类工具时建议 1-2。</div>

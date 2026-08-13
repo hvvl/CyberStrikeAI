@@ -943,9 +943,33 @@ async function showBatchImportModal() {
             }
         }
         await refreshBatchProjectSelectOptions();
+        await refreshBatchAIChannelSelectOptions();
         refreshBatchFormSelects();
 
         openAppModal('batch-import-modal', { focusEl: input });
+    }
+}
+
+// 加载 AI 通道列表到 batch 队列下拉框
+async function refreshBatchAIChannelSelectOptions() {
+    const select = document.getElementById('batch-queue-ai-channel');
+    if (!select) return;
+    try {
+        const cfg = await apiFetch('/api/config');
+        const ai = cfg && cfg.ai && typeof cfg.ai === 'object' ? cfg.ai : {};
+        const channels = ai.channels && typeof ai.channels === 'object' ? ai.channels : {};
+        // 保留默认 option
+        select.innerHTML = '<option value="">' + (_t('batchImportModal.aiChannelDefault') || '默认（跟随全局）') + '</option>';
+        Object.keys(channels).sort().forEach(function (id) {
+            const ch = channels[id] || {};
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = (ch.name || id) + (ch.model ? ' · ' + ch.model : '');
+            select.appendChild(opt);
+        });
+        select.value = '';
+    } catch (e) {
+        // 拉取失败时保留默认 option
     }
 }
 
@@ -1010,6 +1034,7 @@ async function createBatchQueue() {
     const scheduleModeSelect = document.getElementById('batch-queue-schedule-mode');
     const cronExprInput = document.getElementById('batch-queue-cron-expr');
     const executeNowCheckbox = document.getElementById('batch-queue-execute-now');
+    const aiChannelSelect = document.getElementById('batch-queue-ai-channel');
     if (!input) return;
     
     const text = input.value.trim();
@@ -1063,6 +1088,7 @@ async function createBatchQueue() {
                 cronExpr,
                 executeNow,
                 projectId,
+                aiChannelId: aiChannelSelect ? (aiChannelSelect.value || '').trim() : '',
                 concurrency,
             }),
         });
