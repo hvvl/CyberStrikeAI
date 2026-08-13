@@ -43,3 +43,6 @@ vendor/
 .idea/
 .vscode/
 HANDOFF_CODE_REVIEW.md
+
+# Hermes agent workspace (local plans)
+.hermes/
