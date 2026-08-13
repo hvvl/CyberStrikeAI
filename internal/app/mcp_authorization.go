@@ -137,6 +137,14 @@ func mcpToolAuthorizer(db *database.DB) func(context.Context, string, map[string
 				return fmt.Errorf("no access to project %s", projectID)
 			}
 			return nil
+		case builtin.ToolBatchDispatch:
+			if err := require("tasks:write"); err != nil {
+				return err
+			}
+			if projectID := mcpAuthorizationString(args, "project_id"); projectID != "" && (db == nil || !db.UserCanAccessResource(principal.UserID, principal.ScopeFor("tasks:write"), "project", projectID)) {
+				return fmt.Errorf("no access to project %s", projectID)
+			}
+			return nil
 		case builtin.ToolBatchTaskDelete, builtin.ToolBatchTaskRemove:
 			return resource("tasks:delete", "batch_task", "queue_id")
 		case builtin.ToolBatchTaskStart, builtin.ToolBatchTaskRerun, builtin.ToolBatchTaskPause,
