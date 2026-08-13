@@ -11315,10 +11315,11 @@ async function showContinueFailedModal() {
     }
     try {
         const res = await apiFetch('/api/agent-loop/failed');
-        const data = res && res.items ? res.items : [];
-        continueFailedItems = Array.isArray(data) ? data : [];
-        continueFailedTotal = (res && typeof res.total === 'number') ? res.total : continueFailedItems.length;
-        continueFailedTruncated = !!(res && res.truncated);
+        if (!res || !res.ok) throw new Error('HTTP ' + (res ? res.status : 'ERR'));
+        const body = await res.json();
+        continueFailedItems = Array.isArray(body && body.items) ? body.items : [];
+        continueFailedTotal = (body && typeof body.total === 'number') ? body.total : continueFailedItems.length;
+        continueFailedTruncated = !!(body && body.truncated);
     } catch (error) {
         console.error('加载失败会话列表失败:', error);
         if (listEl) {
@@ -11370,11 +11371,12 @@ async function continueSingleFailedConversation(conversationId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ conversationIds: [conversationId] })
         });
-        if (res && res.queued > 0) {
+        const data = res && res.ok ? await res.json() : null;
+        if (data && data.queued > 0) {
             _removeContinueFailedRow(conversationId);
             alert(_cfT('continueFailedModal.queuedOne', '已加入后台续跑队列，可打开该会话查看进度。'));
         } else {
-            const reason = res && Array.isArray(res.skipped) && res.skipped.length ? res.skipped[0].reason : '';
+            const reason = data && Array.isArray(data.skipped) && data.skipped.length ? data.skipped[0].reason : '';
             alert(_cfT('continueFailedModal.queueFailed', '加入续跑队列失败') + (reason ? ': ' + reason : ''));
             renderContinueFailedList();
         }
@@ -11394,7 +11396,8 @@ async function continueAllFailedConversations() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({})
         });
-        const queued = res && typeof res.queued === 'number' ? res.queued : 0;
+        const data = res && res.ok ? await res.json() : null;
+        const queued = data && typeof data.queued === 'number' ? data.queued : 0;
         if (queued > 0) {
             continueFailedItems = [];
             renderContinueFailedList();
@@ -11404,14 +11407,15 @@ async function continueAllFailedConversations() {
                 loadConversationsWithGroups();
             }
         } else {
-            const skipped = res && Array.isArray(res.skipped) ? res.skipped : [];
+            const skipped = data && Array.isArray(data.skipped) ? data.skipped : [];
             alert(skipped.length
                 ? _cfT('continueFailedModal.allSkipped', '没有可继续的会话（正在执行或已在队列中）。')
                 : _cfT('continueFailedModal.empty', '没有因 API 调用失败而中断的会话。'));
             // 模态框已打开：原地刷新列表即可，不重开（避免焦点/滚动闪烁）。
             try {
                 const fresh = await apiFetch('/api/agent-loop/failed');
-                continueFailedItems = Array.isArray(fresh && fresh.items) ? fresh.items : [];
+                const freshBody = fresh && fresh.ok ? await fresh.json() : null;
+                continueFailedItems = Array.isArray(freshBody && freshBody.items) ? freshBody.items : [];
             } catch (e) {
                 continueFailedItems = [];
             }

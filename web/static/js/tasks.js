@@ -958,7 +958,10 @@ async function refreshBatchAIChannelSelectOptions() {
     const select = document.getElementById('batch-queue-ai-channel');
     if (!select) return;
     try {
-        const cfg = await apiFetch('/api/config');
+        // 注意：apiFetch 返回的是 Response，必须先检查 ok 再 .json()。
+        const resp = await apiFetch('/api/config');
+        if (!resp || !resp.ok) return;
+        const cfg = await resp.json();
         const ai = cfg && cfg.ai && typeof cfg.ai === 'object' ? cfg.ai : {};
         const channels = ai.channels && typeof ai.channels === 'object' ? ai.channels : {};
         // 保留默认 option
@@ -2943,33 +2946,78 @@ function resetBatchDispatchCsvState() {
 }
 
 async function ensureBatchDispatchOptionData() {
+    const jobs = [];
     if (batchDispatchState.roleNames === null) {
         batchDispatchState.roleNames = [];
-        try {
-            if (typeof loadRoles === 'function') {
-                const roles = await loadRoles();
-                batchDispatchState.roleNames = (roles || [])
-                    .filter(function (r) { return r && r.name !== '默认' && r.enabled !== false; })
-                    .map(function (r) { return r.name; });
+        jobs.push((async function () {
+            try {
+                if (typeof loadRoles === 'function') {
+                    const roles = await loadRoles();
+                    batchDispatchState.roleNames = (roles || [])
+                        .filter(function (r) { return r && r.name !== '默认' && r.enabled !== false; })
+                        .map(function (r) { return r.name; });
+                }
+            } catch (e) {
+                console.warn('派发弹窗加载角色失败:', e);
             }
-        } catch (e) {
-            console.warn('派发弹窗加载角色失败:', e);
-        }
+        })());
     }
     if (batchDispatchState.channels === null) {
         batchDispatchState.channels = [];
-        try {
-            const cfg = await apiFetch('/api/config');
-            const ai = (cfg && cfg.ai && typeof cfg.ai === 'object') ? cfg.ai : {};
-            const chans = (ai.channels && typeof ai.channels === 'object') ? ai.channels : {};
-            batchDispatchState.channels = Object.keys(chans).sort().map(function (id) {
-                const ch = chans[id] || {};
-                return { id: id, label: (ch.name || id) + (ch.model ? ' · ' + ch.model : '') };
-            });
-        } catch (e) {
-            console.warn('派发弹窗加载通道失败:', e);
-        }
+        jobs.push((async function () {
+            try {
+                // 注意：apiFetch 返回的是 Response，必须先检查 ok 再 .json()。
+                const resp = await apiFetch('/api/config');
+                if (!resp || !resp.ok) return;
+                const cfg = await resp.json();
+                const ai = (cfg && cfg.ai && typeof cfg.ai === 'object') ? cfg.ai : {};
+                const chans = (ai.channels && typeof ai.channels === 'object') ? ai.channels : {};
+                batchDispatchState.channels = Object.keys(chans).sort().map(function (id) {
+                    const ch = chans[id] || {};
+                    return { id: id, label: (ch.name || id) + (ch.model ? ' · ' + ch.model : '') };
+                });
+            } catch (e) {
+                console.warn('派发弹窗加载通道失败:', e);
+            }
+        })());
     }
+    await Promise.all(jobs);
+    // 异步加载完成后，刷新已存在的队列行的通道/角色下拉选项（保留已选值）。
+    refreshBatchDispatchQueueRowOptions();
+}
+
+function buildBatchDispatchChannelOptions() {
+    let channelOpts = '<option value="">' + escapeHtml(_t('batchImportModal.aiChannelDefault') || '默认（跟随全局）') + '</option>';
+    (batchDispatchState.channels || []).forEach(function (ch) {
+        channelOpts += '<option value="' + escapeAttr(ch.id) + '">' + escapeHtml(ch.label) + '</option>';
+    });
+    return channelOpts;
+}
+
+function buildBatchDispatchRoleOptions() {
+    let roleOpts = '<option value="">' + escapeHtml(_t('batchImportModal.defaultRole') || '默认') + '</option>';
+    (batchDispatchState.roleNames || []).forEach(function (name) {
+        roleOpts += '<option value="' + escapeAttr(name) + '">' + escapeHtml(name) + '</option>';
+    });
+    return roleOpts;
+}
+
+// 用最新 state 刷新所有队列行的通道/角色选项；保留用户已选择的有效值。
+function refreshBatchDispatchQueueRowOptions() {
+    document.querySelectorAll('#batch-dispatch-queues .batch-dispatch-queue-row').forEach(function (row) {
+        const chanSel = row.querySelector('.bq-plan-channel');
+        if (chanSel) {
+            const prev = chanSel.value;
+            chanSel.innerHTML = buildBatchDispatchChannelOptions();
+            chanSel.value = (batchDispatchState.channels || []).some(function (c) { return c.id === prev; }) ? prev : '';
+        }
+        const roleSel = row.querySelector('.bq-plan-role');
+        if (roleSel) {
+            const prev = roleSel.value;
+            roleSel.innerHTML = buildBatchDispatchRoleOptions();
+            roleSel.value = (batchDispatchState.roleNames || []).indexOf(prev) !== -1 ? prev : '';
+        }
+    });
 }
 
 function handleBatchCsvFile(file) {
@@ -3126,14 +3174,8 @@ function addBatchDispatchQueueRow() {
     }
     const idx = container.querySelectorAll('.batch-dispatch-queue-row').length;
 
-    let channelOpts = '<option value="">' + escapeHtml(_t('batchImportModal.aiChannelDefault') || '默认（跟随全局）') + '</option>';
-    (batchDispatchState.channels || []).forEach(function (ch) {
-        channelOpts += '<option value="' + escapeAttr(ch.id) + '">' + escapeHtml(ch.label) + '</option>';
-    });
-    let roleOpts = '<option value="">' + escapeHtml(_t('batchImportModal.defaultRole') || '默认') + '</option>';
-    (batchDispatchState.roleNames || []).forEach(function (name) {
-        roleOpts += '<option value="' + escapeAttr(name) + '">' + escapeHtml(name) + '</option>';
-    });
+    const channelOpts = buildBatchDispatchChannelOptions();
+    const roleOpts = buildBatchDispatchRoleOptions();
 
     const row = document.createElement('div');
     row.className = 'batch-dispatch-queue-row';
