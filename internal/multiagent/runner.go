@@ -3,8 +3,8 @@ package multiagent
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"

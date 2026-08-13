@@ -38,7 +38,7 @@ func buildLLMHTTPClient(oa *config.OpenAIConfig, channelID string, logger *zap.L
 		ResponseHeaderTimeout: 60 * time.Minute,
 	}
 	client := &http.Client{
-		Timeout:   30 * time.Minute,
+		Timeout: 30 * time.Minute,
 		// Retry-After transport 在并发限流器外层：cooldown 等待期间不占用通道并发额度。
 		Transport: &retryAfterTransport{channelID: channelID, next: channelLimiterTransport(channelID, oa.MaxConcurrency, base)},
 	}

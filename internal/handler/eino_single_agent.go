@@ -352,7 +352,7 @@ func (h *AgentHandler) EinoSingleAgentLoopStream(c *gin.Context) {
 		}
 
 		// 临时错误重试耗尽 → 若配置了 fallback_channel，切换备用通道分段续跑。
-		if h.tryChannelFailover(runErr, &runCfg, channelFailover, conversationID, &curHistory, sendEvent) {
+		if h.tryChannelFailover(runErr, failedChannelIDFromResult(result), &runCfg, channelFailover, conversationID, &curHistory, sendEvent) {
 			mainIterationOffset += segmentMainIterationMax
 			baseCtx, cancelWithCause, taskCtx, timeoutCancel = h.rebindForChannelFailover(taskCtx, conversationID, timeoutCancel)
 			continue
@@ -483,7 +483,7 @@ func (h *AgentHandler) EinoSingleAgentLoop(c *gin.Context) {
 				h.persistEinoAgentTraceForResume(prep.ConversationID, result)
 			}
 			// 临时错误重试耗尽 → 若配置了 fallback_channel，切换备用通道分段续跑。
-			if h.tryChannelFailover(runErr, &runCfg, channelFailover, prep.ConversationID, &curHist, progressCallback) {
+			if h.tryChannelFailover(runErr, failedChannelIDFromResult(result), &runCfg, channelFailover, prep.ConversationID, &curHist, progressCallback) {
 				continue
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": runErr.Error()})
