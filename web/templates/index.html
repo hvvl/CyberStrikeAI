@@ -6074,6 +6074,11 @@
                 <span class="modal-close" onclick="closeBatchImportModal()">&times;</span>
             </div>
             <div class="modal-body">
+                <div class="batch-import-mode-tabs">
+                    <button type="button" id="batch-mode-manual-btn" class="batch-mode-btn active" onclick="switchBatchImportMode('manual')" data-i18n="batchDispatchModal.modeManual">逐行任务</button>
+                    <button type="button" id="batch-mode-csv-btn" class="batch-mode-btn" onclick="switchBatchImportMode('csv')" data-i18n="batchDispatchModal.modeCsv">CSV 批量派发</button>
+                </div>
+                <div id="batch-import-manual-fields">
                 <div class="form-group">
                     <label for="batch-queue-title" data-i18n="batchImportModal.queueTitle">任务标题</label>
                     <input type="text" id="batch-queue-title" data-i18n="batchImportModal.queueTitlePlaceholder" data-i18n-attr="placeholder" placeholder="请输入任务标题（可选，用于标识和筛选）" />
@@ -6143,10 +6148,83 @@
                 <div class="form-group">
                     <div id="batch-import-stats" class="batch-import-stats"></div>
                 </div>
+                </div>
+                <div id="batch-import-csv-fields" style="display: none;">
+                    <div class="form-group">
+                        <label for="batch-dispatch-title" data-i18n="batchDispatchModal.dispatchTitle">派发标题</label>
+                        <input type="text" id="batch-dispatch-title" data-i18n="batchDispatchModal.dispatchTitlePlaceholder" data-i18n-attr="placeholder" placeholder="可选。用于队列自动命名（如：攻防演练-资产打点 #1）" />
+                    </div>
+                    <div class="form-group">
+                        <label data-i18n="batchDispatchModal.csvFile">资产 CSV 文件</label>
+                        <input type="file" id="batch-csv-file" accept=".csv,.txt" onchange="handleBatchCsvFile(this.files[0])" />
+                        <div class="form-hint" style="margin-top: 4px;" data-i18n="batchDispatchModal.csvFileHint">空间测绘等工具导出的资产清单（如 host,port,title,...）。请先自行完成存活探测与去重。</div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="batch-csv-encoding" data-i18n="batchDispatchModal.encoding">编码</label>
+                            <select id="batch-csv-encoding" onchange="batchDispatchCsvSettingsChanged()">
+                                <option value="utf-8">UTF-8</option>
+                                <option value="gbk">GBK</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="batch-csv-delimiter" data-i18n="batchDispatchModal.delimiter">分隔符</label>
+                            <select id="batch-csv-delimiter" onchange="batchDispatchCsvSettingsChanged()">
+                                <option value=",">逗号 ,</option>
+                                <option value=";">分号 ;</option>
+                                <option value="&#9;">制表符 Tab</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label class="batch-execute-now-label">
+                                <input type="checkbox" id="batch-csv-skip-header" checked onchange="batchDispatchCsvSettingsChanged()" />
+                                <span data-i18n="batchDispatchModal.skipHeader">忽略首行（表头）</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="batch-csv-template"><span data-i18n="batchDispatchModal.template">提示词模板</span><span style="color: red;">*</span></label>
+                        <textarea id="batch-csv-template" rows="6" oninput="refreshBatchDispatchMappings()" data-i18n="batchDispatchModal.templatePlaceholder" data-i18n-attr="placeholder" placeholder="你是渗透测试专家。目标资产：{{target}}，备注：{{note}}。请进行信息收集与漏洞检测并输出报告。" style="font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 0.875rem; line-height: 1.5;"></textarea>
+                        <div class="form-hint" style="margin-top: 4px;" data-i18n="batchDispatchModal.templateHint">用 {{name}} 表示占位符（支持中文名），系统会自动提取并在下方生成列映射。</div>
+                    </div>
+                    <div class="form-group">
+                        <label data-i18n="batchDispatchModal.mappings">占位符 → 列映射</label>
+                        <div id="batch-csv-mappings"></div>
+                        <div class="form-hint" style="margin-top: 4px;" data-i18n="batchDispatchModal.mappingsHint">列号基于原始列（1 起始）；空单元格默认跳过该行。</div>
+                    </div>
+                    <div class="form-group">
+                        <label data-i18n="batchDispatchModal.queuePlans">派发队列（队列间并行，队列内按并发数执行）</label>
+                        <div id="batch-dispatch-queues"></div>
+                        <button type="button" class="btn-secondary" onclick="addBatchDispatchQueueRow()" data-i18n="batchDispatchModal.addQueue">+ 添加队列</button>
+                        <div class="form-hint" style="margin-top: 4px;" data-i18n="batchDispatchModal.queuePlansHint">每个队列可独立指定 AI 通道 / 代理模式 / 角色；最多 16 个队列。</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="batch-dispatch-mode" data-i18n="batchDispatchModal.distributeMode">分发方式</label>
+                        <select id="batch-dispatch-mode" onchange="syncBatchDispatchModeTaskCount()">
+                            <option value="block" data-i18n="batchDispatchModal.modeBlock">分块封顶（按队列任务数上限分配，未设上限的队列承接剩余）</option>
+                            <option value="round_robin" data-i18n="batchDispatchModal.modeRoundRobin">轮询均匀（第 i 行进第 i%N 队）</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="batch-dispatch-project-id" data-i18n="batchImportModal.project">所属项目</label>
+                        <select id="batch-dispatch-project-id">
+                            <option value="" data-i18n="batchImportModal.projectNone">（未绑定）</option>
+                        </select>
+                    </div>
+                    <label class="batch-execute-now-label">
+                        <input type="checkbox" id="batch-dispatch-execute-now" checked />
+                        <span data-i18n="batchDispatchModal.executeNow">派发后立即执行</span>
+                    </label>
+                    <div class="form-group">
+                        <label data-i18n="batchDispatchModal.preview">数据预览（前 5 行）</label>
+                        <div id="batch-csv-preview" class="batch-csv-preview"></div>
+                        <div id="batch-csv-stats" class="batch-import-stats"></div>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn-secondary" onclick="closeBatchImportModal()" data-i18n="common.cancel">取消</button>
-                <button class="btn-primary" data-require-permission="tasks:write" onclick="createBatchQueue()" data-i18n="batchImportModal.createQueue">创建队列</button>
+                <button id="batch-import-submit-btn" class="btn-primary" data-require-permission="tasks:write" onclick="submitBatchImport()" data-i18n="batchImportModal.createQueue">创建队列</button>
             </div>
         </div>
     </div>

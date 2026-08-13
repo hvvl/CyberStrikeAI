@@ -945,6 +945,9 @@ async function showBatchImportModal() {
         await refreshBatchProjectSelectOptions();
         await refreshBatchAIChannelSelectOptions();
         refreshBatchFormSelects();
+        // 重置 CSV 派发状态并回到「逐行任务」模式（默认行为保持不变）
+        resetBatchDispatchCsvState();
+        switchBatchImportMode('manual');
 
         openAppModal('batch-import-modal', { focusEl: input });
     }
@@ -1621,6 +1624,9 @@ function renderBatchQueues() {
             scheduleLabel += ` (${queue.cronExpr})`;
         }
         const configLine = [roleName, agentLabel, scheduleLabel].map(s => escapeHtml(s)).join(' · ');
+        const groupBadge = queue.batchGroupId
+            ? ` <span class="batch-queue-group-badge" title="${escapeAttr(_t('batchDispatchModal.groupBadgeTitle'))}">${escapeHtml(_t('batchDispatchModal.groupBadge'))} ${escapeHtml(queue.batchGroupId.length > 12 ? queue.batchGroupId.slice(0, 10) + '…' : queue.batchGroupId)}</span>`
+            : '';
         const cronPausedNote = queue.scheduleMode === 'cron' && queue.scheduleEnabled === false
             ? ` <span class="batch-queue-inline-warn" title="${escapeHtml(_t('batchQueueDetailModal.scheduleCronAutoHint'))}">(${escapeHtml(_t('batchQueueDetailModal.cronSchedulePausedBadge'))})</span>`
             : '';
@@ -1638,7 +1644,7 @@ function renderBatchQueues() {
                             <span class="batch-queue-item__role-icon" aria-hidden="true">${escapeHtml(roleIcon)}</span>
                             <div class="batch-queue-item__titles">${titleBlock}</div>
                         </div>
-                        <p class="batch-queue-item__config">${configLine}${cronPausedNote}</p>
+                        <p class="batch-queue-item__config">${configLine}${cronPausedNote}${groupBadge}</p>
                         <p class="batch-queue-item__idline batch-queue-item__idline--lead"><code title="${escapeAttr(queue.id)}">${shortId}</code><span class="batch-queue-item__idsep">\u00b7</span><span>${escapeHtml(_t('tasks.createdTimeLabel'))}\u00a0${escapeHtml(new Date(queue.createdAt).toLocaleString())}</span></p>
                     </div>
                     <div class="batch-queue-item__cluster">
@@ -1654,6 +1660,7 @@ function renderBatchQueues() {
                         </div>
                     </div>
                     <div class="batch-queue-item__actions-col" onclick="event.stopPropagation();">
+                        ${(queue.batchGroupId && (queue.status === 'running' || queue.status === 'paused')) ? `<button type="button" class="batch-queue-icon-btn batch-queue-icon-btn--danger" onclick="cancelBatchDispatchGroup(${escapeJsStringAttr(queue.batchGroupId)})" title="${escapeHtml(_t('batchDispatchModal.groupCancelBtn'))}" aria-label="${escapeHtml(_t('batchDispatchModal.groupCancelBtn'))}"><svg class="batch-queue-icon-btn__svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>` : ''}
                         <button type="button" class="batch-queue-icon-btn" onclick="navigateToVulnerabilitiesFromTasksPage('queue', ${escapeJsStringAttr(queue.id)})" title="${escapeHtml(_t('tasks.viewVulnerabilitiesQueueTitle'))}" aria-label="${escapeHtml(_t('tasks.viewVulnerabilitiesQueueTitle'))}"><svg class="batch-queue-icon-btn__svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg></button>
                         ${canDelete ? `<button type="button" class="batch-queue-icon-btn batch-queue-icon-btn--danger" onclick="deleteBatchQueueFromList(${escapeJsStringAttr(queue.id)})" title="${escapeHtml(_t('tasks.deleteQueue'))}" aria-label="${escapeHtml(_t('tasks.deleteQueue'))}"><svg class="batch-queue-icon-btn__svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>` : ''}
                     </div>
@@ -2878,6 +2885,404 @@ async function saveInlineSchedule() {
     }
 }
 
+// ==================== CSV 批量派发 ====================
+const batchDispatchState = {
+    csvFile: null,       // File 对象（编码变更时重读）
+    csvText: '',
+    csvRows: [],         // 解析后的二维数组（含表头行，如果 skipHeader=false）
+    maxCols: 0,
+    headerRow: null,     // skipHeader=true 时保存表头行（用于列选项提示）
+    mapCol: {},          // 占位符名 → 列号（1 起始）
+    roleNames: null,     // 角色名缓存
+    channels: null       // [{id, label}] 通道缓存
+};
+
+function switchBatchImportMode(mode) {
+    const manualFields = document.getElementById('batch-import-manual-fields');
+    const csvFields = document.getElementById('batch-import-csv-fields');
+    const manualBtn = document.getElementById('batch-mode-manual-btn');
+    const csvBtn = document.getElementById('batch-mode-csv-btn');
+    const submitBtn = document.getElementById('batch-import-submit-btn');
+    if (manualFields) manualFields.style.display = mode === 'manual' ? '' : 'none';
+    if (csvFields) csvFields.style.display = mode === 'csv' ? '' : 'none';
+    if (manualBtn) manualBtn.classList.toggle('active', mode === 'manual');
+    if (csvBtn) csvBtn.classList.toggle('active', mode === 'csv');
+    if (submitBtn) {
+        const key = mode === 'csv' ? 'batchDispatchModal.dispatch' : 'batchImportModal.createQueue';
+        submitBtn.setAttribute('data-i18n', key);
+        submitBtn.textContent = _t(key) || (mode === 'csv' ? '派发任务' : '创建队列');
+    }
+    if (mode === 'csv') {
+        ensureBatchDispatchOptionData();
+        if (!document.querySelector('#batch-dispatch-queues .batch-dispatch-queue-row')) {
+            addBatchDispatchQueueRow();
+        }
+        syncBatchDispatchModeTaskCount();
+    }
+}
+
+function resetBatchDispatchCsvState() {
+    batchDispatchState.csvFile = null;
+    batchDispatchState.csvText = '';
+    batchDispatchState.csvRows = [];
+    batchDispatchState.maxCols = 0;
+    batchDispatchState.headerRow = null;
+    batchDispatchState.mapCol = {};
+    const fileInput = document.getElementById('batch-csv-file');
+    if (fileInput) fileInput.value = '';
+    const preview = document.getElementById('batch-csv-preview');
+    if (preview) preview.innerHTML = '';
+    const stats = document.getElementById('batch-csv-stats');
+    if (stats) stats.innerHTML = '';
+    const mappings = document.getElementById('batch-csv-mappings');
+    if (mappings) mappings.innerHTML = '';
+    const queues = document.getElementById('batch-dispatch-queues');
+    if (queues) queues.innerHTML = '';
+    const template = document.getElementById('batch-csv-template');
+    if (template) template.value = '';
+}
+
+async function ensureBatchDispatchOptionData() {
+    if (batchDispatchState.roleNames === null) {
+        batchDispatchState.roleNames = [];
+        try {
+            if (typeof loadRoles === 'function') {
+                const roles = await loadRoles();
+                batchDispatchState.roleNames = (roles || [])
+                    .filter(function (r) { return r && r.name !== '默认' && r.enabled !== false; })
+                    .map(function (r) { return r.name; });
+            }
+        } catch (e) {
+            console.warn('派发弹窗加载角色失败:', e);
+        }
+    }
+    if (batchDispatchState.channels === null) {
+        batchDispatchState.channels = [];
+        try {
+            const cfg = await apiFetch('/api/config');
+            const ai = (cfg && cfg.ai && typeof cfg.ai === 'object') ? cfg.ai : {};
+            const chans = (ai.channels && typeof ai.channels === 'object') ? ai.channels : {};
+            batchDispatchState.channels = Object.keys(chans).sort().map(function (id) {
+                const ch = chans[id] || {};
+                return { id: id, label: (ch.name || id) + (ch.model ? ' · ' + ch.model : '') };
+            });
+        } catch (e) {
+            console.warn('派发弹窗加载通道失败:', e);
+        }
+    }
+}
+
+function handleBatchCsvFile(file) {
+    if (!file) return;
+    batchDispatchState.csvFile = file;
+    readBatchDispatchCsvFile(file);
+}
+
+function readBatchDispatchCsvFile(file) {
+    const encEl = document.getElementById('batch-csv-encoding');
+    const enc = encEl && encEl.value === 'gbk' ? 'gbk' : 'utf-8';
+    const reader = new FileReader();
+    reader.onload = function () {
+        batchDispatchState.csvText = String(reader.result || '');
+        batchDispatchCsvSettingsChanged();
+    };
+    reader.onerror = function () {
+        alert(_t('batchDispatchModal.csvReadFailed'));
+    };
+    reader.readAsText(file, enc);
+}
+
+function batchDispatchCsvSettingsChanged() {
+    if (!batchDispatchState.csvText) return;
+    if (batchDispatchState.csvFile) {
+        // 编码变化 → 重读原始文件
+        readBatchDispatchCsvFile(batchDispatchState.csvFile);
+        return;
+    }
+    refreshBatchDispatchPreview();
+    refreshBatchDispatchMappings();
+}
+
+// 轻量 CSV 预览解析（仅展示用；权威解析在服务端 Go encoding/csv）
+function parseCsvPreview(text, delimiter) {
+    const d = delimiter === '\\t' ? '\t' : delimiter;
+    const lines = [];
+    let row = [], cell = '', inQ = false;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (inQ) {
+            if (ch === '"') {
+                if (text[i + 1] === '"') { cell += '"'; i++; } else { inQ = false; }
+            } else { cell += ch; }
+        } else if (ch === '"') {
+            inQ = true;
+        } else if (ch === d) {
+            row.push(cell); cell = '';
+        } else if (ch === '\n') {
+            row.push(cell.replace(/\r$/, '')); lines.push(row); row = []; cell = '';
+        } else {
+            cell += ch;
+        }
+    }
+    if (cell !== '' || row.length) { row.push(cell.replace(/\r$/, '')); lines.push(row); }
+    return lines.filter(function (r) { return !(r.length === 1 && r[0] === ''); });
+}
+
+function refreshBatchDispatchPreview() {
+    const skipHeader = document.getElementById('batch-csv-skip-header');
+    const delimEl = document.getElementById('batch-csv-delimiter');
+    const delim = delimEl ? delimEl.value : ',';
+    const skip = skipHeader ? skipHeader.checked : true;
+
+    let rows = parseCsvPreview(batchDispatchState.csvText, delim);
+    batchDispatchState.headerRow = (skip && rows.length > 0) ? rows[0] : null;
+    if (skip && rows.length > 0) rows = rows.slice(1);
+    batchDispatchState.csvRows = rows;
+    batchDispatchState.maxCols = 0;
+    rows.forEach(function (r) { if (r.length > batchDispatchState.maxCols) batchDispatchState.maxCols = r.length; });
+
+    const preview = document.getElementById('batch-csv-preview');
+    const stats = document.getElementById('batch-csv-stats');
+    if (preview) {
+        if (rows.length === 0) {
+            preview.innerHTML = '<div class="batch-csv-preview-empty">' + escapeHtml(_t('batchDispatchModal.noData')) + '</div>';
+        } else {
+            const maxCols = Math.min(batchDispatchState.maxCols, 8);
+            let html = '<table class="batch-csv-preview-table"><thead><tr>';
+            for (let c = 0; c < maxCols; c++) {
+                html += '<th>' + escapeHtml(_t('batchDispatchModal.column', { n: c + 1 }) +
+                    (batchDispatchState.headerRow && batchDispatchState.headerRow[c] ? ' · ' + batchDispatchState.headerRow[c] : '')) + '</th>';
+            }
+            html += '</tr></thead><tbody>';
+            rows.slice(0, 5).forEach(function (r) {
+                html += '<tr>';
+                for (let c = 0; c < maxCols; c++) {
+                    html += '<td>' + escapeHtml(r[c] || '') + '</td>';
+                }
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            preview.innerHTML = html;
+        }
+    }
+    if (stats) {
+        stats.innerHTML = '<div class="batch-import-stats-row">' +
+            escapeHtml(_t('batchDispatchModal.statsRows', { rows: rows.length })) +
+            (batchDispatchState.headerRow ? ' · ' + escapeHtml(_t('batchDispatchModal.statsHeaderSkipped')) : '') +
+            ' · ' + escapeHtml(_t('batchDispatchModal.statsCols', { cols: batchDispatchState.maxCols })) +
+            '</div>';
+    }
+}
+
+function refreshBatchDispatchMappings() {
+    const template = document.getElementById('batch-csv-template');
+    const container = document.getElementById('batch-csv-mappings');
+    if (!template || !container) return;
+    const names = [];
+    const seen = {};
+    const re = /\{\{\s*([^{}\s]+)\s*\}\}/g;
+    let m;
+    while ((m = re.exec(template.value)) !== null) {
+        if (!seen[m[1]]) { seen[m[1]] = true; names.push(m[1]); }
+    }
+    if (names.length === 0) {
+        container.innerHTML = '<div class="form-hint">' + escapeHtml(_t('batchDispatchModal.noPlaceholder')) + '</div>';
+        return;
+    }
+    const maxCols = Math.max(batchDispatchState.maxCols, 1);
+    container.innerHTML = names.map(function (name) {
+        let options = '';
+        for (let c = 1; c <= maxCols; c++) {
+            const label = _t('batchDispatchModal.column', { n: c }) +
+                (batchDispatchState.headerRow && batchDispatchState.headerRow[c - 1] ? ' · ' + batchDispatchState.headerRow[c - 1] : '');
+            options += '<option value="' + c + '"' + (String(batchDispatchState.mapCol[name] || 1) === String(c) ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+        }
+        return '<div class="batch-map-row"><span class="batch-map-name">{{' + escapeHtml(name) + '}}</span>' +
+            '<span class="batch-map-arrow">→</span>' +
+            '<select data-map-name="' + escapeAttr(name) + '" onchange="batchDispatchMapColChanged(this)">' + options + '</select></div>';
+    }).join('');
+}
+
+function batchDispatchMapColChanged(sel) {
+    const name = sel.getAttribute('data-map-name');
+    const col = parseInt(sel.value, 10);
+    if (name && Number.isFinite(col) && col >= 1) {
+        batchDispatchState.mapCol[name] = col;
+    }
+}
+
+function addBatchDispatchQueueRow() {
+    const container = document.getElementById('batch-dispatch-queues');
+    if (!container) return;
+    if (container.querySelectorAll('.batch-dispatch-queue-row').length >= 16) {
+        alert(_t('batchDispatchModal.tooManyQueues'));
+        return;
+    }
+    const idx = container.querySelectorAll('.batch-dispatch-queue-row').length;
+
+    let channelOpts = '<option value="">' + escapeHtml(_t('batchImportModal.aiChannelDefault') || '默认（跟随全局）') + '</option>';
+    (batchDispatchState.channels || []).forEach(function (ch) {
+        channelOpts += '<option value="' + escapeAttr(ch.id) + '">' + escapeHtml(ch.label) + '</option>';
+    });
+    let roleOpts = '<option value="">' + escapeHtml(_t('batchImportModal.defaultRole') || '默认') + '</option>';
+    (batchDispatchState.roleNames || []).forEach(function (name) {
+        roleOpts += '<option value="' + escapeAttr(name) + '">' + escapeHtml(name) + '</option>';
+    });
+
+    const row = document.createElement('div');
+    row.className = 'batch-dispatch-queue-row';
+    row.innerHTML =
+        '<div class="bq-plan-field bq-plan-field--title"><input type="text" class="bq-plan-title" data-i18n="batchDispatchModal.queueTitlePlaceholder" data-i18n-attr="placeholder" placeholder="队列标题（可选）" /></div>' +
+        '<div class="bq-plan-field"><select class="bq-plan-channel">' + channelOpts + '</select></div>' +
+        '<div class="bq-plan-field"><select class="bq-plan-agent">' +
+        '<option value="eino_single">Eino 单代理</option>' +
+        '<option value="deep">Deep</option>' +
+        '<option value="plan_execute">Plan-Execute</option>' +
+        '<option value="supervisor">Supervisor</option>' +
+        '</select></div>' +
+        '<div class="bq-plan-field"><select class="bq-plan-role">' + roleOpts + '</select></div>' +
+        '<div class="bq-plan-field bq-plan-field--num"><input type="number" class="bq-plan-concurrency" min="1" max="8" value="1" title="' + escapeAttr(_t('batchDispatchModal.concurrencyTitle')) + '" /></div>' +
+        '<div class="bq-plan-field bq-plan-field--num"><input type="number" class="bq-plan-taskcount" min="0" value="0" placeholder="0" title="' + escapeAttr(_t('batchDispatchModal.taskCountTitle')) + '" /></div>' +
+        '<button type="button" class="bq-plan-remove" onclick="removeBatchDispatchQueueRow(this)" title="' + escapeAttr(_t('batchDispatchModal.removeQueue')) + '">×</button>';
+    container.appendChild(row);
+    syncBatchDispatchModeTaskCount();
+}
+
+function removeBatchDispatchQueueRow(btn) {
+    const row = btn.closest('.batch-dispatch-queue-row');
+    if (row) row.remove();
+    syncBatchDispatchModeTaskCount();
+}
+
+function syncBatchDispatchModeTaskCount() {
+    const modeEl = document.getElementById('batch-dispatch-mode');
+    const isBlock = !modeEl || modeEl.value !== 'round_robin';
+    document.querySelectorAll('#batch-dispatch-queues .bq-plan-taskcount').forEach(function (input) {
+        input.disabled = !isBlock;
+        if (!isBlock) input.value = 0;
+    });
+}
+
+function submitBatchImport() {
+    const csvFields = document.getElementById('batch-import-csv-fields');
+    if (csvFields && csvFields.style.display !== 'none') {
+        dispatchBatchTasks();
+    } else {
+        createBatchQueue();
+    }
+}
+
+function collectBatchDispatchPayload() {
+    const placeholders = [];
+    document.querySelectorAll('#batch-csv-mappings select[data-map-name]').forEach(function (sel) {
+        const col = parseInt(sel.value, 10);
+        placeholders.push({ name: sel.getAttribute('data-map-name'), column: Number.isFinite(col) ? col : 0 });
+    });
+    const queues = [];
+    document.querySelectorAll('#batch-dispatch-queues .batch-dispatch-queue-row').forEach(function (row) {
+        queues.push({
+            title: row.querySelector('.bq-plan-title') ? row.querySelector('.bq-plan-title').value.trim() : '',
+            aiChannelId: row.querySelector('.bq-plan-channel') ? row.querySelector('.bq-plan-channel').value : '',
+            agentMode: row.querySelector('.bq-plan-agent') ? row.querySelector('.bq-plan-agent').value : 'eino_single',
+            role: row.querySelector('.bq-plan-role') ? row.querySelector('.bq-plan-role').value : '',
+            concurrency: parseInt((row.querySelector('.bq-plan-concurrency') || {}).value, 10) || 1,
+            taskCount: parseInt((row.querySelector('.bq-plan-taskcount') || {}).value, 10) || 0
+        });
+    });
+    const skipEl = document.getElementById('batch-csv-skip-header');
+    const delimEl = document.getElementById('batch-csv-delimiter');
+    const encEl = document.getElementById('batch-csv-encoding');
+    const modeEl = document.getElementById('batch-dispatch-mode');
+    const execEl = document.getElementById('batch-dispatch-execute-now');
+    const projectEl = document.getElementById('batch-dispatch-project-id');
+    return {
+        title: document.getElementById('batch-dispatch-title') ? document.getElementById('batch-dispatch-title').value.trim() : '',
+        template: document.getElementById('batch-csv-template').value,
+        placeholders: placeholders,
+        csv: {
+            content: batchDispatchState.csvText,
+            fileName: batchDispatchState.csvFile ? batchDispatchState.csvFile.name : '',
+            delimiter: delimEl ? delimEl.value : ',',
+            skipHeader: skipEl ? skipEl.checked : true,
+            encoding: encEl ? encEl.value : 'utf-8',
+            emptyCellPolicy: 'skip_row'
+        },
+        queues: queues,
+        distributeMode: modeEl ? modeEl.value : 'block',
+        executeNow: execEl ? !!execEl.checked : false,
+        projectId: projectEl ? (projectEl.value || '').trim() : ''
+    };
+}
+
+async function dispatchBatchTasks() {
+    if (typeof requirePermission === 'function' && !requirePermission('tasks:write')) return;
+    if (!batchDispatchState.csvText) {
+        alert(_t('batchDispatchModal.noCsv'));
+        return;
+    }
+    const template = document.getElementById('batch-csv-template');
+    if (!template || !template.value.trim()) {
+        alert(_t('batchDispatchModal.templateRequired'));
+        return;
+    }
+    const payload = collectBatchDispatchPayload();
+    if (payload.placeholders.length === 0) {
+        alert(_t('batchDispatchModal.noPlaceholder'));
+        return;
+    }
+    for (const p of payload.placeholders) {
+        if (!p.column || p.column < 1) {
+            alert(_t('batchDispatchModal.invalidColumn'));
+            return;
+        }
+    }
+    if (payload.queues.length === 0) {
+        alert(_t('batchDispatchModal.noQueue'));
+        return;
+    }
+    try {
+        const response = await apiFetch('/api/batch-tasks/dispatch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.error || _t('batchDispatchModal.dispatchFailed'));
+        }
+        const result = await response.json();
+        closeBatchImportModal();
+        refreshBatchQueues();
+        alert(_t('batchDispatchModal.dispatchSuccess', {
+            total: result.totalTasks,
+            queues: result.queues.length,
+            skipped: result.skippedRows,
+            group: result.groupId
+        }));
+    } catch (error) {
+        console.error('CSV 批量派发失败:', error);
+        alert(_t('batchDispatchModal.dispatchFailed') + ': ' + error.message);
+    }
+}
+
+async function cancelBatchDispatchGroup(groupId) {
+    if (typeof requirePermission === 'function' && !requirePermission('tasks:write')) return;
+    if (!confirm(_t('batchDispatchModal.confirmGroupCancel'))) return;
+    try {
+        const response = await apiFetch('/api/batch-tasks/group/' + encodeURIComponent(groupId) + '/cancel', { method: 'POST' });
+        if (!response.ok) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.error || _t('batchDispatchModal.groupCancelFailed'));
+        }
+        const result = await response.json();
+        alert(_t('batchDispatchModal.groupCancelSuccess', { n: result.cancelled || 0 }));
+        refreshBatchQueues();
+    } catch (error) {
+        console.error('取消派发组失败:', error);
+        alert(_t('batchDispatchModal.groupCancelFailed') + ': ' + error.message);
+    }
+}
+
 // 导出函数
 window.showBatchImportModal = showBatchImportModal;
 window.closeBatchImportModal = closeBatchImportModal;
@@ -2916,6 +3321,15 @@ window.runSingleBatchTask = runSingleBatchTask;
 window.startInlineEditSchedule = startInlineEditSchedule;
 window.toggleInlineScheduleCron = toggleInlineScheduleCron;
 window.saveInlineSchedule = saveInlineSchedule;
+window.switchBatchImportMode = switchBatchImportMode;
+window.submitBatchImport = submitBatchImport;
+window.handleBatchCsvFile = handleBatchCsvFile;
+window.batchDispatchCsvSettingsChanged = batchDispatchCsvSettingsChanged;
+window.refreshBatchDispatchMappings = refreshBatchDispatchMappings;
+window.batchDispatchMapColChanged = batchDispatchMapColChanged;
+window.addBatchDispatchQueueRow = addBatchDispatchQueueRow;
+window.removeBatchDispatchQueueRow = removeBatchDispatchQueueRow;
+window.cancelBatchDispatchGroup = cancelBatchDispatchGroup;
 
 // 语言切换后，列表/分页/详情弹窗由 JS 渲染的文案需用当前语言重绘（applyTranslations 不会处理 innerHTML 内容）
 document.addEventListener('languagechange', function () {

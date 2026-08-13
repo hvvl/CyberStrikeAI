@@ -21097,6 +21097,176 @@ tr.mcp-stats-tool-row[data-tool-name]:focus-visible {
     font-weight: 500;
 }
 
+/* ===== CSV 批量派发（batch-dispatch） ===== */
+.batch-import-mode-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+}
+
+.batch-mode-btn {
+    padding: 8px 16px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--text-secondary, #6b7280);
+}
+
+.batch-mode-btn.active {
+    color: var(--accent-color, #0066ff);
+    border-bottom-color: var(--accent-color, #0066ff);
+    font-weight: 600;
+}
+
+#batch-import-modal .form-row {
+    display: flex;
+    gap: 12px;
+}
+
+#batch-import-modal .form-row .form-group {
+    margin-bottom: 0;
+}
+
+.batch-map-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--border-color, #e5e7eb);
+}
+
+.batch-map-name {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--accent-color, #0066ff);
+    background: rgba(0, 102, 255, 0.08);
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.batch-map-arrow {
+    color: var(--text-secondary, #6b7280);
+}
+
+.batch-map-row select {
+    flex: 1;
+    max-width: 420px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 4px;
+}
+
+.batch-dispatch-queue-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--border-color, #e5e7eb);
+    flex-wrap: wrap;
+}
+
+.bq-plan-field {
+    flex: 1;
+    min-width: 90px;
+}
+
+.bq-plan-field--title {
+    flex: 2;
+    min-width: 140px;
+}
+
+.bq-plan-field--num {
+    flex: 0 0 64px;
+    min-width: 64px;
+}
+
+.bq-plan-field input,
+.bq-plan-field select {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.bq-plan-field input:disabled {
+    background: var(--bg-disabled, #f3f4f6);
+    opacity: 0.6;
+}
+
+.bq-plan-remove {
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--danger-color, #dc2626);
+    font-size: 1.1rem;
+    cursor: pointer;
+}
+
+.bq-plan-remove:hover {
+    background: rgba(220, 38, 38, 0.08);
+}
+
+.batch-csv-preview {
+    max-height: 220px;
+    overflow: auto;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 6px;
+    margin-top: 4px;
+}
+
+.batch-csv-preview-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.batch-csv-preview-table th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-elevated, #f9fafb);
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+    white-space: nowrap;
+}
+
+.batch-csv-preview-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border-color, #f3f4f6);
+    white-space: nowrap;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.batch-csv-preview-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--text-secondary, #6b7280);
+    font-size: 0.875rem;
+}
+
+#batch-csv-stats {
+    display: block;
+    margin-top: 8px;
+}
+
+.batch-queue-group-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(139, 92, 246, 0.12);
+    color: #8b5cf6;
+    font-size: 0.75rem;
+}
+
 @media (max-width: 768px) {
     .batch-queue-header {
         flex-direction: column;
