@@ -3,10 +3,28 @@ command: "python3"
 args:
   - "-c"
   - |
-    import sys, json, subprocess, os, time, signal, re
+    import sys, json, subprocess, os, time, signal, re, selectors
 
     action = sys.argv[1] if len(sys.argv) > 1 else "start"
     SESSION_FILE = os.path.join(os.environ.get("CYBERSTRIKE_WORKSPACE", "/tmp"), ".interactsh_session")
+
+    # 带超时的行读取：用 selectors 等待管道可读，避免进程存活但不输出时
+    # blocking readline() 卡死、使「20/15 秒总超时」失效。
+    # 返回 (line, eof, timeout)。
+    def read_line(proc, sel, timeout):
+        try:
+            ready = sel.select(timeout)
+        except (ValueError, OSError, IOError):
+            return None, True, False
+        if not ready:
+            return None, False, True
+        line = proc.stdout.readline()
+        if line == "":
+            # 管道 EOF：进程退出（正常/异常）都算结束；进程还活着则视为暂时无数据
+            if proc.poll() is not None:
+                return None, True, False
+            return None, False, True
+        return line, False, False
 
     def start(server=None):
         """Start interactsh-client with -sf session file. It runs as a short-lived
@@ -22,15 +40,19 @@ args:
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 stdin=subprocess.PIPE, text=True
             )
+            sel = selectors.DefaultSelector()
+            sel.register(proc.stdout, selectors.EVENT_READ)
             output_lines = []
             domain = None
-            t0 = time.time()
-            while time.time() - t0 < 20:
-                line = proc.stdout.readline()
-                if not line:
-                    if proc.poll() is not None:
+            deadline = time.time() + 20
+            while True:
+                remain = deadline - time.time()
+                if remain <= 0:
+                    break
+                line, eof, timed_out = read_line(proc, sel, remain)
+                if line is None:
+                    if eof or timed_out:
                         break
-                    time.sleep(0.3)
                     continue
                 output_lines.append(line.strip())
                 # interactsh prints: [INF] c23b2xxxxx.oast.pro
@@ -78,15 +100,19 @@ args:
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 stdin=subprocess.PIPE, text=True
             )
+            sel = selectors.DefaultSelector()
+            sel.register(proc.stdout, selectors.EVENT_READ)
             output_lines = []
             interactions = []
-            t0 = time.time()
-            while time.time() - t0 < 15:
-                line = proc.stdout.readline()
-                if not line:
-                    if proc.poll() is not None:
+            deadline = time.time() + 15
+            while True:
+                remain = deadline - time.time()
+                if remain <= 0:
+                    break
+                line, eof, timed_out = read_line(proc, sel, remain)
+                if line is None:
+                    if eof or timed_out:
                         break
-                    time.sleep(0.3)
                     continue
                 output_lines.append(line.strip())
                 # Interaction lines contain protocol info: DNS/HTTP/SMTP/etc

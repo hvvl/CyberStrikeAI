@@ -11236,6 +11236,23 @@ if (typeof window !== 'undefined') {
 // 一键继续失败会话（API 调用失败后重试耗尽的会话）
 // ============================================================
 let continueFailedItems = [];
+let continueFailedTotal = 0;
+let continueFailedTruncated = false;
+
+// 更新计数显示（含截断提示）：标题显示真实总数，列表只渲染最近 100 条。
+function updateContinueFailedCount() {
+    const countEl = document.getElementById('continue-failed-count');
+    if (countEl) countEl.textContent = String(continueFailedTotal > 0 ? continueFailedTotal : continueFailedItems.length);
+    const hintEl = document.getElementById('continue-failed-hint');
+    if (hintEl && continueFailedTruncated && continueFailedTotal > continueFailedItems.length) {
+        hintEl.textContent = _cfT('continueFailedModal.truncatedHint', '当前显示最近 100 条')
+            .replace('{{total}}', String(continueFailedTotal))
+            + '；' + _cfT('continueFailedModal.continueAllHint', '点击「全部继续」将把全部 {{total}} 个失败会话加入后台续跑队列。')
+                .replace('{{total}}', String(continueFailedTotal));
+    } else if (hintEl) {
+        hintEl.textContent = _cfT('continueFailedModal.hint', '以下会话的上一次执行因 API 调用失败而中断。点击「全部继续」将按队列顺序在后台逐个恢复执行；也可以单独继续某个会话。');
+    }
+}
 
 function _cfT(key, fallback, opts) {
     if (typeof window.t === 'function') {
@@ -11256,9 +11273,8 @@ function formatFailedAt(iso) {
 
 function renderContinueFailedList() {
     const listEl = document.getElementById('continue-failed-list');
-    const countEl = document.getElementById('continue-failed-count');
     if (!listEl) return;
-    if (countEl) countEl.textContent = String(continueFailedItems.length);
+    updateContinueFailedCount();
 
     if (!continueFailedItems.length) {
         listEl.innerHTML = '<div class="continue-failed-empty">' + escapeHtml(_cfT('continueFailedModal.empty', '没有因 API 调用失败而中断的会话。')) + '</div>';
@@ -11288,6 +11304,8 @@ function renderContinueFailedList() {
 
 async function showContinueFailedModal() {
     continueFailedItems = [];
+    continueFailedTotal = 0;
+    continueFailedTruncated = false;
     renderContinueFailedList();
     openAppModal('continue-failed-modal', { focus: false });
     const listEl = document.getElementById('continue-failed-list');
@@ -11298,6 +11316,8 @@ async function showContinueFailedModal() {
         const res = await apiFetch('/api/agent-loop/failed');
         const data = res && res.items ? res.items : [];
         continueFailedItems = Array.isArray(data) ? data : [];
+        continueFailedTotal = (res && typeof res.total === 'number') ? res.total : continueFailedItems.length;
+        continueFailedTruncated = !!(res && res.truncated);
     } catch (error) {
         console.error('加载失败会话列表失败:', error);
         if (listEl) {

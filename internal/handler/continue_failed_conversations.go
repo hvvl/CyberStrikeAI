@@ -151,12 +151,13 @@ func parseFlexibleTime(s string) time.Time {
 
 // ListFailedConversations GET /api/agent-loop/failed —— 列出 API 调用失败的会话。
 func (h *AgentHandler) ListFailedConversations(c *gin.Context) {
-	items, err := h.ListAPIFailedConversations(100)
+	// 取全部失败会话（不限条数），统一 RBAC/运行中过滤后计算真实 total，
+	// 列表只返回最近 100 条，避免「界面看 100 条、继续全部却入队几百条」的错位。
+	items, err := h.ListAPIFailedConversations(0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// RBAC 过滤 + 排除正在运行的任务
 	visible := make([]*FailedConversationItem, 0, len(items))
 	for _, it := range items {
 		if h.tasks != nil && h.tasks.GetTask(it.ConversationID) != nil {
@@ -167,7 +168,13 @@ func (h *AgentHandler) ListFailedConversations(c *gin.Context) {
 		}
 		visible = append(visible, it)
 	}
-	c.JSON(http.StatusOK, gin.H{"items": visible, "count": len(visible)})
+	total := len(visible)
+	const listCap = 100
+	truncated := total > listCap
+	if truncated {
+		visible = visible[:listCap]
+	}
+	c.JSON(http.StatusOK, gin.H{"items": visible, "count": len(visible), "total": total, "truncated": truncated})
 }
 
 // ContinueFailedConversationsRequest 一键继续失败会话的请求体。
@@ -422,7 +429,7 @@ func (h *AgentHandler) continueFailedConversation(conversationID string) {
 		if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {
 			h.persistEinoAgentTraceForResume(conversationID, result)
 		}
-		if h.tryChannelFailover(runErr, &runCfg, failover, conversationID, &curHistory, func(eventType, message string, data interface{}) {
+		if h.tryChannelFailover(runErr, failedChannelIDFromResult(result), &runCfg, failover, conversationID, &curHistory, func(eventType, message string, data interface{}) {
 			h.publishContinueFailedEvent(conversationID, eventType, message, data)
 		}) {
 			continue

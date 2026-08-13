@@ -973,7 +973,7 @@
                                                     </button>
                                                 </div>
                                             </div>
-                                            <button class="batch-manage-btn continue-failed-btn" data-require-permission="chat:write" onclick="showContinueFailedModal()" data-i18n="chat.continueFailedConversations" data-i18n-attr="title" data-i18n-skip-text="true" title="继续失败的会话">
+                                            <button class="batch-manage-btn continue-failed-btn" data-require-permission="tasks:write" onclick="showContinueFailedModal()" data-i18n="chat.continueFailedConversations" data-i18n-attr="title" data-i18n-skip-text="true" title="继续失败的会话">
                                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                                     <path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                                                 </svg>
@@ -5870,7 +5870,7 @@
                 </div>
             </div>
             <div class="modal-body batch-manage-body">
-                <p class="continue-failed-hint" data-i18n="continueFailedModal.hint">以下会话的上一次执行因 API 调用失败而中断。点击「全部继续」将按队列顺序在后台逐个恢复执行；也可以单独继续某个会话。</p>
+                <p id="continue-failed-hint" class="continue-failed-hint" data-i18n="continueFailedModal.hint">以下会话的上一次执行因 API 调用失败而中断。点击「全部继续」将按队列顺序在后台逐个恢复执行；也可以单独继续某个会话。</p>
                 <div class="batch-conversations-table">
                     <div class="batch-table-header">
                         <div class="batch-table-col-name" data-i18n="batchManageModal.conversationName">对话名称</div>

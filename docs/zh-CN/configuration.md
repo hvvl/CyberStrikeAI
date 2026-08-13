@@ -91,13 +91,13 @@ ai:
 
 - **重试次数与退避**：默认 6 次、单次退避上限 30 秒（equal-jitter 指数退避）。全局值在 `multi_agent.eino_middleware.run_retry_max_attempts` / `run_retry_max_backoff_sec`，通道级字段（见上表）优先于全局。
 - **Retry-After**：响应头带 `Retry-After`（429/503 等）时，该通道在指定时长内进入冷却（单次冷却硬上限 120 秒），新请求等待冷却结束再发出；等待不占用通道并发额度。
-- **跨通道降级**：通道配置 `fallback_channel` 后，本通道重试耗尽会自动切换到备用通道分段续跑（已完成的工具调用进度保留，不会从头重跑）。最多切换一次，`fallback_channel` 链成环会被自动截断。
+- **跨通道降级**：通道配置 `fallback_channel` 后，本通道重试耗尽会自动切换到备用通道分段续跑（已完成的工具调用进度保留，不会从头重跑）。最多切换一次，`fallback_channel` 链成环会被自动截断。失败通道由 HTTP Transport 层（429/5xx 响应）判定归属：**角色通道失败时优先使用该通道自己的 `fallback_channel`**，降级后本请求内该通道被重定向到备用通道（Agent Markdown 中显式写死的 `channel` 也会解析到备用通道）；失败通道未配置 `fallback_channel` 时回退会话通道的降级配置。
 
 > **已知限制**：
-> - **多 Agent 角色通道的重试策略归属**：当子 Agent 通过 `channel` 字段显式指定了独立通道时，该子 Agent 的 HTTP 请求（含并发限流、Retry-After 冷却）确实走子通道，但外层重试次数/退避/failover 目标仍按会话通道（`ai.default_channel`）的配置计算。并发安全不受影响（限流器按通道 ID 全局独立注册），但子通道配置的 `run_retry_max_attempts` / `fallback_channel` 不会对该子 Agent 的重试和降级生效。后续计划让错误携带实际失败通道 ID 以彻底解决。
+> - **多 Agent 角色通道的重试次数归属**：子 Agent 显式指定 `channel` 后，其 HTTP 请求（含并发限流、Retry-After 冷却）与 failover 降级目标都按子通道处理，但外层**重试次数/退避节奏**仍按会话通道（`ai.default_channel`）的配置计算（run loop 是会话级重试层，无法同时套用多套节奏）。子通道的 `run_retry_max_attempts` / `run_retry_max_backoff_sec` 会在该通道作为会话通道时生效。另外，多会话并发且多通道同时失败时，失败通道归属按「最近失败」启发式判定，存在极小概率的跨会话误归属。
 > - **后台续跑的执行身份**：一键继续失败会话的后台 worker 以会话所有者（conversation owner）身份执行 Agent，与 `batch_queue_executor` 的既定委托模式一致。若需要更严格的权限隔离（如继承入队发起者权限），需统一调整所有后台批处理路径。
 > - **failover 后迭代预算**：跨通道分段续跑的每一段会重新取 `agent.max_iterations` 作为该段上限，因此整任务的总迭代数可能达到配置值的 2 倍。`max_iterations` 的语义是"每段上限"而非"整任务硬上限"。
-- **一键继续失败会话**：对话侧边栏“最近对话”旁的“继续失败的会话”按钮可列出所有因 API 调用失败而中断的会话，支持单个或全部加入后台续跑队列，进度通过任务事件实时推送。对应 API：`GET /api/agent-loop/failed`、`POST /api/agent-loop/continue-failed`（需 `chat:write` 权限）。
+- **一键继续失败会话**：对话侧边栏“最近对话”旁的“继续失败的会话”按钮可列出所有因 API 调用失败而中断的会话，支持单个或全部加入后台续跑队列，进度通过任务事件实时推送。对应 API：`GET /api/agent-loop/failed`、`POST /api/agent-loop/continue-failed`（需 `tasks:write` 权限，与批量任务管理一致）。
 
 ## Agent
 

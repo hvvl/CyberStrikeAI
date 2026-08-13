@@ -41,7 +41,7 @@ type BatchDispatchPlaceholder struct {
 type BatchDispatchCSV struct {
 	Content         string `json:"content"`
 	FileName        string `json:"fileName,omitempty"`
-	Delimiter       string `json:"delimiter,omitempty"`       // "," | ";" | "\t"
+	Delimiter       string `json:"delimiter,omitempty"` // "," | ";" | "\t"
 	SkipHeader      bool   `json:"skipHeader"`
 	Encoding        string `json:"encoding,omitempty"`        // utf-8 | gbk
 	EmptyCellPolicy string `json:"emptyCellPolicy,omitempty"` // skip_row | keep
