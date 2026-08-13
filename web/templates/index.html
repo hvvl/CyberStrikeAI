@@ -6184,8 +6184,8 @@
                     </div>
                     <div class="form-group">
                         <label for="batch-csv-template"><span data-i18n="batchDispatchModal.template">提示词模板</span><span style="color: red;">*</span></label>
-                        <textarea id="batch-csv-template" rows="6" oninput="refreshBatchDispatchMappings()" data-i18n="batchDispatchModal.templatePlaceholder" data-i18n-attr="placeholder" placeholder="你是渗透测试专家。目标资产：{{target}}，备注：{{note}}。请进行信息收集与漏洞检测并输出报告。" style="font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 0.875rem; line-height: 1.5;"></textarea>
-                        <div class="form-hint" style="margin-top: 4px;" data-i18n="batchDispatchModal.templateHint">用 {{name}} 表示占位符（支持中文名），系统会自动提取并在下方生成列映射。</div>
+                        <textarea id="batch-csv-template" rows="6" oninput="refreshBatchDispatchMappings()" data-i18n="batchDispatchModal.templatePlaceholder" data-i18n-attr="placeholder" placeholder="你是渗透测试专家。目标资产：&#123;&#123;target&#125;&#125;，备注：&#123;&#123;note&#125;&#125;。请进行信息收集与漏洞检测并输出报告。" style="font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 0.875rem; line-height: 1.5;"></textarea>
+                        <div class="form-hint" style="margin-top: 4px;" data-i18n="batchDispatchModal.templateHint">用 &#123;&#123;name&#125;&#125; 表示占位符（支持中文名），系统会自动提取并在下方生成列映射。</div>
                     </div>
                     <div class="form-group">
                         <label data-i18n="batchDispatchModal.mappings">占位符 → 列映射</label>
