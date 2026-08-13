@@ -562,6 +562,18 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 							"type":        "boolean",
 							"description": "是否创建后立即执行（默认 false）",
 						},
+						"projectId": map[string]interface{}{
+							"type":        "string",
+							"description": "队列内子对话绑定的项目 ID（可选）",
+						},
+						"aiChannelId": map[string]interface{}{
+							"type":        "string",
+							"description": "队列绑定的 AI 通道 ID（可选，空则跟随全局默认通道）",
+						},
+						"concurrency": map[string]interface{}{
+							"type":        "integer",
+							"description": "同时执行的子任务数（1-8），默认 1",
+						},
 					},
 				},
 				"BatchQueue": map[string]interface{}{

@@ -1443,6 +1443,21 @@ func (db *DB) migrateBatchTaskQueuesTable() error {
 		}
 	}
 
+	var aiChannelIDCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('batch_task_queues') WHERE name='ai_channel_id'").Scan(&aiChannelIDCount)
+	if err != nil {
+		if _, addErr := db.Exec("ALTER TABLE batch_task_queues ADD COLUMN ai_channel_id TEXT"); addErr != nil {
+			errMsg := strings.ToLower(addErr.Error())
+			if !strings.Contains(errMsg, "duplicate column") && !strings.Contains(errMsg, "already exists") {
+				db.logger.Warn("添加batch_task_queues.ai_channel_id字段失败", zap.Error(addErr))
+			}
+		}
+	} else if aiChannelIDCount == 0 {
+		if _, err := db.Exec("ALTER TABLE batch_task_queues ADD COLUMN ai_channel_id TEXT"); err != nil {
+			db.logger.Warn("添加batch_task_queues.ai_channel_id字段失败", zap.Error(err))
+		}
+	}
+
 	return nil
 }
 

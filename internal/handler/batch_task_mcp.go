@@ -195,6 +195,10 @@ func RegisterBatchTaskMCPTools(mcpServer *mcp.Server, h *AgentHandler, logger *z
 					"type":        "integer",
 					"description": "同时执行的子任务数，默认 1（串行），最大 8。含扫描类工具时建议 1-2。",
 				},
+				"ai_channel_id": map[string]interface{}{
+					"type":        "string",
+					"description": "队列绑定的 AI 通道 ID（可选）。指定后该队列的所有子任务使用该通道的模型/密钥/并发额度；空则跟随全局默认通道。",
+				},
 			},
 		},
 	}, func(ctx context.Context, args map[string]interface{}) (*mcp.ToolResult, error) {
