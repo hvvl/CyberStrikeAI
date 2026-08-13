@@ -669,7 +669,166 @@ schedule_mode 为 cron 时必须提供有效 cron_expr；为 manual 时会清除
 		return batchMCPJSONResult(queue)
 	})
 
-	logger.Debug("批量任务 MCP 工具已注册", zap.Int("count", 12))
+	// --- dispatch（CSV 批量派发） ---
+	reg(mcp.Tool{
+		Name: builtin.ToolBatchDispatch,
+		Description: `【用途】CSV 批量派发：读取 CSV 资产清单（如空间测绘引擎导出的 host,port,title 等），用提示词模板中的 {{占位符}} 逐行渲染消息，并按队列计划拆分为多个批量任务队列（每队列可独立指定 AI 通道/代理模式/角色），队列间并行、队列内按并发数执行。
+
+【参数】template（必填，含 {{name}} 占位符）；placeholders（必填，JSON 数组，如 [{"name":"target","column":1}]，列号 1 起始）；csv_content（必填，CSV 原文）；queues（必填，JSON 数组，每项 {"title","ai_channel_id","agent_mode","role","concurrency","task_count"}，task_count 为分块模式封顶、0=承接剩余）。可选：csv_encoding（utf-8/gbk）、csv_delimiter（, ; tab）、skip_header（默认 true）、empty_cell_policy（skip_row/keep）、distribute_mode（block 默认 / round_robin）、execute_now、project_id。
+
+【返回】group_id、total_tasks、skipped_rows、queues[{queue_id,task_count,started}]。`,
+		ShortDescription: "CSV批量派发：模板占位符渲染资产清单并拆分为多队列",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"title": map[string]interface{}{
+					"type":        "string",
+					"description": "派发标题（可选，用于队列自动命名）",
+				},
+				"template": map[string]interface{}{
+					"type":        "string",
+					"description": "提示词模板，用 {{name}} 表示占位符（支持中文名）",
+				},
+				"placeholders": map[string]interface{}{
+					"type":        "string",
+					"description": "占位符→列映射 JSON 数组，如 [{\"name\":\"target\",\"column\":1}]，列号 1 起始",
+				},
+				"csv_content": map[string]interface{}{
+					"type":        "string",
+					"description": "CSV 文件原文（UTF-8 或 GBK）",
+				},
+				"queues": map[string]interface{}{
+					"type":        "string",
+					"description": "队列计划 JSON 数组，每项 {\"title\":\"\",\"ai_channel_id\":\"\",\"agent_mode\":\"eino_single|deep|plan_execute|supervisor\",\"role\":\"\",\"concurrency\":1,\"task_count\":0}；task_count 为分块模式任务数上限（0=承接剩余）",
+				},
+				"csv_encoding": map[string]interface{}{
+					"type":        "string",
+					"description": "CSV 编码：utf-8（默认）或 gbk",
+					"enum":        []string{"utf-8", "gbk"},
+				},
+				"csv_delimiter": map[string]interface{}{
+					"type":        "string",
+					"description": "CSV 分隔符：,（默认）、; 或 tab",
+				},
+				"skip_header": map[string]interface{}{
+					"type":        "boolean",
+					"description": "是否忽略首行表头，默认 true",
+				},
+				"empty_cell_policy": map[string]interface{}{
+					"type":        "string",
+					"description": "映射列为空时的处理：skip_row（跳过该行，默认）或 keep（替换为空串）",
+					"enum":        []string{"skip_row", "keep"},
+				},
+				"distribute_mode": map[string]interface{}{
+					"type":        "string",
+					"description": "分发方式：block（分块封顶，默认）或 round_robin（轮询均匀）",
+					"enum":        []string{"block", "round_robin"},
+				},
+				"execute_now": map[string]interface{}{
+					"type":        "boolean",
+					"description": "派发后是否立即执行各队列，默认 false",
+				},
+				"project_id": map[string]interface{}{
+					"type":        "string",
+					"description": "队列内子对话绑定的项目 ID（可选）",
+				},
+			},
+			"required": []string{"template", "placeholders", "csv_content", "queues"},
+		},
+	}, func(ctx context.Context, args map[string]interface{}) (*mcp.ToolResult, error) {
+		req := &BatchDispatchRequest{
+			Title:      strings.TrimSpace(mcpArgString(args, "title")),
+			Template:   mcpArgString(args, "template"),
+			CSV:        BatchDispatchCSV{Content: mcpArgString(args, "csv_content")},
+			ProjectID:  strings.TrimSpace(mcpArgString(args, "project_id")),
+		}
+		if raw := mcpArgString(args, "placeholders"); raw != "" {
+			var phs []batchDispatchMCPPlaceholder
+			if err := json.Unmarshal([]byte(raw), &phs); err != nil {
+				return batchMCPTextResult("placeholders JSON 解析失败: "+err.Error(), true), nil
+			}
+			for _, p := range phs {
+				req.Placeholders = append(req.Placeholders, BatchDispatchPlaceholder{Name: p.Name, Column: p.Column})
+			}
+		}
+		if raw := mcpArgString(args, "queues"); raw != "" {
+			var plans []batchDispatchMCPQueue
+			if err := json.Unmarshal([]byte(raw), &plans); err != nil {
+				return batchMCPTextResult("queues JSON 解析失败: "+err.Error(), true), nil
+			}
+			for _, q := range plans {
+				req.Queues = append(req.Queues, BatchDispatchQueuePlan{
+					Title: q.Title, AIChannelID: strings.TrimSpace(q.AIChannelID),
+					AgentMode: q.AgentMode, Role: q.Role,
+					Concurrency: q.Concurrency, TaskCount: q.TaskCount,
+				})
+			}
+		}
+		if v := strings.TrimSpace(mcpArgString(args, "csv_encoding")); v != "" {
+			req.CSV.Encoding = v
+		}
+		if v := strings.TrimSpace(mcpArgString(args, "csv_delimiter")); v != "" {
+			req.CSV.Delimiter = v
+		}
+		if v := strings.TrimSpace(mcpArgString(args, "empty_cell_policy")); v != "" {
+			req.CSV.EmptyCellPolicy = v
+		}
+		if v := strings.TrimSpace(mcpArgString(args, "distribute_mode")); v != "" {
+			req.DistributeMode = v
+		}
+		if v, ok := mcpArgBool(args, "skip_header"); ok {
+			req.CSV.SkipHeader = v
+		} else {
+			req.CSV.SkipHeader = true
+		}
+		executeNow, ok := mcpArgBool(args, "execute_now")
+		if !ok {
+			executeNow = false
+		}
+		req.ExecuteNow = executeNow
+
+		principal, principalOK := authctx.PrincipalFromContext(ctx)
+		userID := ""
+		if principalOK {
+			userID = principal.UserID
+		}
+		resp, err := h.buildBatchDispatch(req, userID)
+		if err != nil {
+			return batchMCPTextResult("派发失败: "+err.Error(), true), nil
+		}
+		queueResults := make([]map[string]interface{}, 0, len(resp.Queues))
+		for _, q := range resp.Queues {
+			queueResults = append(queueResults, map[string]interface{}{
+				"queue_id": q.QueueID, "task_count": q.TaskCount, "started": q.Started,
+			})
+		}
+		logger.Info("MCP batch_dispatch", zap.String("groupId", resp.GroupID), zap.Int("totalTasks", resp.TotalTasks), zap.Int("queues", len(resp.Queues)))
+		return batchMCPJSONResult(map[string]interface{}{
+			"group_id":     resp.GroupID,
+			"total_tasks":  resp.TotalTasks,
+			"skipped_rows": resp.SkippedRows,
+			"queues":       queueResults,
+			"reminder":     "各队列已创建；execute_now=false 时队列为 pending，可分别用 batch_task_start 启动，或调用 /api/batch-tasks/group/{group_id}/start 一键启动整组。",
+		})
+	})
+
+	logger.Debug("批量任务 MCP 工具已注册", zap.Int("count", 13))
+}
+
+// batchDispatchMCPPlaceholder 占位符映射（MCP 参数 JSON 数组元素）。
+type batchDispatchMCPPlaceholder struct {
+	Name   string `json:"name"`
+	Column int    `json:"column"`
+}
+
+// batchDispatchMCPQueue 队列计划（MCP 参数 JSON 数组元素）。
+type batchDispatchMCPQueue struct {
+	Title       string `json:"title,omitempty"`
+	AIChannelID string `json:"ai_channel_id,omitempty"`
+	AgentMode   string `json:"agent_mode,omitempty"`
+	Role        string `json:"role,omitempty"`
+	Concurrency int    `json:"concurrency,omitempty"`
+	TaskCount   int    `json:"task_count,omitempty"`
 }
 
 // --- batch_task_list 精简结构（避免把每条子任务的 result 等大段文本塞进列表上下文） ---

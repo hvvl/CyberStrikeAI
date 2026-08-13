@@ -576,6 +576,70 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 						},
 					},
 				},
+				"BatchDispatchRequest": map[string]interface{}{
+					"type":     "object",
+					"required": []string{"template", "placeholders", "csv", "queues"},
+					"properties": map[string]interface{}{
+						"title": map[string]interface{}{
+							"type":        "string",
+							"description": "派发标题（可选，用于队列自动命名）",
+						},
+						"template": map[string]interface{}{
+							"type":        "string",
+							"description": "提示词模板，用 {{name}} 表示占位符（支持中文名）",
+						},
+						"placeholders": map[string]interface{}{
+							"type":        "array",
+							"description": "占位符→列映射（列号 1 起始，基于原始列）",
+							"items": map[string]interface{}{
+								"type": "object",
+								"properties": map[string]interface{}{
+									"name":   map[string]interface{}{"type": "string", "description": "模板中的占位符名"},
+									"column": map[string]interface{}{"type": "integer", "description": "CSV 列号（1 起始）"},
+								},
+							},
+						},
+						"csv": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"content":         map[string]interface{}{"type": "string", "description": "CSV 原文（≤2MB）"},
+								"fileName":        map[string]interface{}{"type": "string", "description": "文件名（可选）"},
+								"delimiter":       map[string]interface{}{"type": "string", "description": "分隔符，默认 ,"},
+								"skipHeader":      map[string]interface{}{"type": "boolean", "description": "忽略首行表头"},
+								"encoding":        map[string]interface{}{"type": "string", "enum": []string{"utf-8", "gbk"}, "description": "编码，默认 utf-8"},
+								"emptyCellPolicy": map[string]interface{}{"type": "string", "enum": []string{"skip_row", "keep"}, "description": "空单元格策略，默认 skip_row"},
+							},
+						},
+						"queues": map[string]interface{}{
+							"type":        "array",
+							"description": "队列计划（1-16 个）",
+							"items": map[string]interface{}{
+								"type": "object",
+								"properties": map[string]interface{}{
+									"title":       map[string]interface{}{"type": "string", "description": "队列标题（可选）"},
+									"aiChannelId": map[string]interface{}{"type": "string", "description": "AI 通道 ID（空=跟随全局默认）"},
+									"agentMode":   map[string]interface{}{"type": "string", "enum": []string{"eino_single", "deep", "plan_execute", "supervisor"}},
+									"role":        map[string]interface{}{"type": "string", "description": "角色名（可选）"},
+									"concurrency": map[string]interface{}{"type": "integer", "description": "队列内并发数 1-8，默认 1"},
+									"taskCount":   map[string]interface{}{"type": "integer", "description": "block 模式任务数上限，0=承接剩余"},
+								},
+							},
+						},
+						"distributeMode": map[string]interface{}{
+							"type":        "string",
+							"enum":        []string{"block", "round_robin"},
+							"description": "分发方式：block（分块封顶，默认）| round_robin（轮询均匀）",
+						},
+						"executeNow": map[string]interface{}{
+							"type":        "boolean",
+							"description": "派发后是否立即执行",
+						},
+						"projectId": map[string]interface{}{
+							"type":        "string",
+							"description": "队列内子对话绑定的项目 ID（可选）",
+						},
+					},
+				},
 				"BatchQueue": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -2022,6 +2086,79 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 						"401": map[string]interface{}{
 							"description": "未授权",
 						},
+					},
+				},
+			},
+			"/api/batch-tasks/dispatch": map[string]interface{}{
+				"post": map[string]interface{}{
+					"tags":        []string{"批量任务"},
+					"summary":     "CSV 批量派发任务",
+					"description": "解析 CSV 资产清单，按模板占位符渲染消息，拆分为多个队列（每队列独立 AI 通道/代理模式/角色），可选立即执行",
+					"operationId": "dispatchBatchTasks",
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"$ref": "#/components/schemas/BatchDispatchRequest",
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "派发成功（返回派发组 ID 与队列清单）",
+						},
+						"400": map[string]interface{}{
+							"description": "参数错误（CSV 解析/占位符映射/队列计划校验失败）",
+						},
+						"401": map[string]interface{}{
+							"description": "未授权",
+						},
+					},
+				},
+			},
+			"/api/batch-tasks/group/{groupId}/start": map[string]interface{}{
+				"post": map[string]interface{}{
+					"tags":        []string{"批量任务"},
+					"summary":     "启动派发组全部队列",
+					"description": "启动同一 CSV 派发批次下所有 pending/paused 队列",
+					"operationId": "startBatchGroup",
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "groupId",
+							"in":          "path",
+							"required":    true,
+							"description": "派发组 ID",
+							"schema":      map[string]interface{}{"type": "string"},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "启动完成（返回 started 计数）"},
+						"404": map[string]interface{}{"description": "派发组不存在或无队列"},
+						"401": map[string]interface{}{"description": "未授权"},
+					},
+				},
+			},
+			"/api/batch-tasks/group/{groupId}/cancel": map[string]interface{}{
+				"post": map[string]interface{}{
+					"tags":        []string{"批量任务"},
+					"summary":     "取消派发组全部队列",
+					"description": "取消同一 CSV 派发批次下所有 running/paused 队列",
+					"operationId": "cancelBatchGroup",
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "groupId",
+							"in":          "path",
+							"required":    true,
+							"description": "派发组 ID",
+							"schema":      map[string]interface{}{"type": "string"},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "取消完成（返回 cancelled 计数）"},
+						"404": map[string]interface{}{"description": "派发组不存在或无队列"},
+						"401": map[string]interface{}{"description": "未授权"},
 					},
 				},
 			},

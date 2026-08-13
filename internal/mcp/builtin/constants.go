@@ -63,6 +63,7 @@ const (
 	ToolBatchTaskAdd             = "batch_task_add_task"
 	ToolBatchTaskUpdate          = "batch_task_update_task"
 	ToolBatchTaskRemove          = "batch_task_remove_task"
+	ToolBatchDispatch            = "batch_dispatch"
 
 	// C2 工具集（合并同类项，8 个统一工具）
 	ToolC2Listener   = "c2_listener"    // 监听器管理（create/start/stop/list/get/update/delete）
@@ -121,6 +122,7 @@ func IsBuiltinTool(toolName string) bool {
 		ToolBatchTaskAdd,
 		ToolBatchTaskUpdate,
 		ToolBatchTaskRemove,
+		ToolBatchDispatch,
 		// C2 工具
 		ToolC2Listener,
 		ToolC2Session,
@@ -182,6 +184,7 @@ func GetAllBuiltinTools() []string {
 		ToolBatchTaskAdd,
 		ToolBatchTaskUpdate,
 		ToolBatchTaskRemove,
+		ToolBatchDispatch,
 		// C2 工具
 		ToolC2Listener,
 		ToolC2Session,
