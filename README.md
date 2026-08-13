@@ -204,7 +204,7 @@ See [tools/README_EN.md](tools/README_EN.md) for tool definitions, customization
 
 **One-Command Deployment:**
 ```bash
-git clone https://github.com/Ed1s0nZ/CyberStrikeAI.git
+git clone https://github.com/hvvl/CyberStrikeAI.git
 cd CyberStrikeAI
 chmod +x run.sh && ./run.sh
 ```
@@ -249,14 +249,23 @@ The `run.sh` script will automatically:
    **macOS (Homebrew):**
    ```bash
    brew install nmap masscan sqlmap nikto gobuster ffuf hydra hashcat nuclei subfinder
+   pip install ddddocr
+   go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
    ```
 
    **Linux (Kali / Debian / Ubuntu):**
    ```bash
    sudo apt update
-   sudo apt install -y nmap masscan sqlmap nikto gobuster hydra hashcat john binwalk
+   sudo apt install -y nmap masscan sqlmap nikto gobuster hydra hashcat john binwalk exploitdb
    # On some distros, install ffuf/nuclei/subfinder via go install or upstream docs
+   pip install ddddocr
+   go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
    ```
+
+   **Fork-specific enhancements** (OOB detection, captcha OCR, exploit search):
+   - `interactsh-client` — OOB (out-of-band) detection; see `tools/interactsh.yaml`
+   - `ddddocr` — captcha OCR recognition; see `tools/ocr_captcha.yaml`
+   - `exploitdb` (provides `searchsploit`) — local exploit search; see `tools/search_exploit.yaml`
 
    See the `tools/` directory for the full list; refer to each tool's official docs for install details.
 

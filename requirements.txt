@@ -15,3 +15,6 @@ impacket>=0.11.0
 
 # MCP (Model Context Protocol) SDK
 mcp>=1.0.0
+
+# Captcha OCR (fork enhancement: captcha recognition tool)
+ddddocr>=1.5.6

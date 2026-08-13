@@ -197,7 +197,7 @@ CyberStrikeAI 将规划、执行、人工监督、证据与复盘连接在同一
 
 **一条命令部署：**
 ```bash
-git clone https://github.com/Ed1s0nZ/CyberStrikeAI.git
+git clone https://github.com/hvvl/CyberStrikeAI.git
 cd CyberStrikeAI
 chmod +x run.sh && ./run.sh
 ```
@@ -242,14 +242,23 @@ chmod +x run.sh && ./run.sh
    **macOS（Homebrew）：**
    ```bash
    brew install nmap masscan sqlmap nikto gobuster ffuf hydra hashcat nuclei subfinder
+   pip install ddddocr
+   go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
    ```
 
    **Linux（Kali / Debian / Ubuntu）：**
    ```bash
    sudo apt update
-   sudo apt install -y nmap masscan sqlmap nikto gobuster hydra hashcat john binwalk
+   sudo apt install -y nmap masscan sqlmap nikto gobuster hydra hashcat john binwalk exploitdb
    # 部分发行版需自行安装：ffuf、nuclei、subfinder 等可用 go install 或见各工具官网
+   pip install ddddocr
+   go install -v github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
    ```
+
+   **本 Fork 专有增强**（OOB 带外检测、验证码 OCR、漏洞搜索）：
+   - `interactsh-client` — OOB 带外检测；见 `tools/interactsh.yaml`
+   - `ddddocr` — 验证码 OCR 自动识别；见 `tools/ocr_captcha.yaml`
+   - `exploitdb`（提供 `searchsploit`）— 本地漏洞搜索；见 `tools/search_exploit.yaml`
 
    完整工具列表见 `tools/` 目录；各工具安装方式以官方文档为准。
 
