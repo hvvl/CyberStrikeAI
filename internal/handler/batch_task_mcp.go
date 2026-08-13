@@ -737,10 +737,10 @@ schedule_mode 为 cron 时必须提供有效 cron_expr；为 manual 时会清除
 		},
 	}, func(ctx context.Context, args map[string]interface{}) (*mcp.ToolResult, error) {
 		req := &BatchDispatchRequest{
-			Title:      strings.TrimSpace(mcpArgString(args, "title")),
-			Template:   mcpArgString(args, "template"),
-			CSV:        BatchDispatchCSV{Content: mcpArgString(args, "csv_content")},
-			ProjectID:  strings.TrimSpace(mcpArgString(args, "project_id")),
+			Title:     strings.TrimSpace(mcpArgString(args, "title")),
+			Template:  mcpArgString(args, "template"),
+			CSV:       BatchDispatchCSV{Content: mcpArgString(args, "csv_content")},
+			ProjectID: strings.TrimSpace(mcpArgString(args, "project_id")),
 		}
 		if raw := mcpArgString(args, "placeholders"); raw != "" {
 			var phs []batchDispatchMCPPlaceholder
