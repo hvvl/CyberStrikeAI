@@ -2,6 +2,7 @@ package multiagent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -221,7 +222,7 @@ func RunEinoSingleChatModelAgent(
 	}
 
 	retryAttempts, retryBackoffSec := ResolveEinoRunRetryArgs(&ma.EinoMiddleware, &appCfg.OpenAI)
-	return runEinoADKAgentLoop(ctx, &einoADKRunLoopArgs{
+	result, runErr := runEinoADKAgentLoop(ctx, &einoADKRunLoopArgs{
 		OrchMode:                "eino_single",
 		OrchestratorName:        einoSingleAgentName,
 		ConversationID:          conversationID,
@@ -249,4 +250,10 @@ func RunEinoSingleChatModelAgent(
 		EmptyResponseMessage: "(Eino ADK single-agent session completed but no assistant text was captured. Check process details or logs.) " +
 			"（Eino ADK 单代理会话已完成，但未捕获到助手文本输出。请查看过程详情或日志。）",
 	}, baseMsgs)
+	if runErr != nil && result != nil && errors.Is(runErr, ErrRetryExhausted) {
+		if id := takeRecentFailedChannel(); id != "" {
+			result.FailedChannelID = id
+		}
+	}
+	return result, runErr
 }

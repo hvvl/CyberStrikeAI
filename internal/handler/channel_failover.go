@@ -36,11 +36,44 @@ func newChannelFailoverState(initialChannelID string) *channelFailoverState {
 	return s
 }
 
+// resolveChannelFailoverTarget 计算失败通道对应的 fallback 通道 ID（空=不降级）。
+// 失败通道非会话通道时优先用该通道自己的 fallback_channel，缺省回退会话通道的 fallback；
+// 失败通道为空或等于会话通道时维持原有「会话通道 fallback」语义。
+func resolveChannelFailoverTarget(cur *config.Config, failedChannelID string) string {
+	if cur == nil {
+		return ""
+	}
+	failedID := config.NormalizeAIChannelID(failedChannelID)
+	sessionID := config.NormalizeAIChannelID(cur.AI.DefaultChannel)
+	if failedID == "" {
+		failedID = sessionID
+	}
+	fallback := ""
+	if failedID != sessionID {
+		if cur.AI.Channels != nil {
+			if ch, ok := cur.AI.Channels[failedID]; ok {
+				fallback = strings.TrimSpace(ch.FallbackChannel)
+			}
+		}
+		if fallback == "" {
+			fallback = strings.TrimSpace(cur.OpenAI.FallbackChannel)
+		}
+	} else {
+		fallback = strings.TrimSpace(cur.OpenAI.FallbackChannel)
+	}
+	return fallback
+}
+
 // tryChannelFailover 在重试耗尽时尝试切换 fallback 通道。
-// 成功时替换 *runCfg 并更新 *curHistory（从代理轨迹），返回 true，调用方应 continue 循环；
-// 否则返回 false，调用方走普通失败路径。
+// failedChannelID 由 RunDeepAgent 判定（transport 层 429/5xx 响应登记的失败通道）：
+// 非空且非会话通道时，优先使用该通道自己的 fallback_channel；
+// 为空或等于会话通道时，维持原有「会话通道 fallback」语义。
+// 成功时替换 *runCfg 并更新 *curHistory（从代理轨迹），同时把失败通道→备用通道
+// 写入 runCfg.AI.ChannelAliases，使 Agent Markdown 中显式写死的 channel 在后续
+// 分段续跑（RunDeepAgent 重建 DA 时）解析到备用通道。返回 true，调用方应 continue。
 func (h *AgentHandler) tryChannelFailover(
 	runErr error,
+	failedChannelID string,
 	runCfg **config.Config,
 	state *channelFailoverState,
 	conversationID string,
@@ -60,7 +93,14 @@ func (h *AgentHandler) tryChannelFailover(
 		return false
 	}
 
-	fallback := strings.TrimSpace(cur.OpenAI.FallbackChannel)
+	// 失败通道判定：优先 transport 登记的失败角色通道，回退会话默认通道。
+	failedID := config.NormalizeAIChannelID(failedChannelID)
+	sessionID := config.NormalizeAIChannelID(cur.AI.DefaultChannel)
+	if failedID == "" {
+		failedID = sessionID
+	}
+
+	fallback := resolveChannelFailoverTarget(cur, failedChannelID)
 	if fallback == "" {
 		return false
 	}
@@ -88,6 +128,24 @@ func (h *AgentHandler) tryChannelFailover(
 		return false
 	}
 
+	// 注入运行时通道别名：失败通道 → 备用通道。
+	// 会话通道本身已通过 runCfg.OpenAI 替换完成切换；别名主要服务
+	// Agent Markdown 中显式绑定失败通道的子代理/主代理。
+	if failedID != resolvedID {
+		if newCfg.AI.ChannelAliases == nil {
+			newCfg.AI.ChannelAliases = make(map[string]string)
+		}
+		newCfg.AI.ChannelAliases[failedID] = resolvedID
+	}
+	// 保留既有别名（理论上 switched 限一次，但防御性合并）。
+	if len(cur.AI.ChannelAliases) > 0 {
+		for k, v := range cur.AI.ChannelAliases {
+			if _, exists := newCfg.AI.ChannelAliases[k]; !exists {
+				newCfg.AI.ChannelAliases[k] = v
+			}
+		}
+	}
+
 	// 从已持久化的代理轨迹重建历史，保留切换前的上下文。
 	if hist, herr := h.loadHistoryFromAgentTrace(conversationID); herr == nil && len(hist) > 0 {
 		if curHistory != nil {
@@ -96,6 +154,9 @@ func (h *AgentHandler) tryChannelFailover(
 	}
 
 	fromChannel := cur.AI.DefaultChannel
+	if failedID != sessionID {
+		fromChannel = failedID
+	}
 	*runCfg = newCfg
 	if state != nil {
 		state.switched = true
@@ -118,6 +179,14 @@ func (h *AgentHandler) tryChannelFailover(
 			zap.Error(runErr))
 	}
 	return true
+}
+
+// failedChannelIDFromResult 安全提取 RunResult 中 transport 层判定的失败通道 ID。
+func failedChannelIDFromResult(result *multiagent.RunResult) string {
+	if result == nil {
+		return ""
+	}
+	return strings.TrimSpace(result.FailedChannelID)
 }
 
 // rebindForChannelFailover 复用 rebindEinoRunningTask 重建 ctx（同 empty_response continue），

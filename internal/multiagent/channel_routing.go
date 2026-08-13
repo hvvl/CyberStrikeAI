@@ -57,6 +57,12 @@ func resolveAgentChannel(appCfg *config.Config, channelID string) (config.OpenAI
 		return config.OpenAIConfig{}, "", false, nil
 	}
 	nid := config.NormalizeAIChannelID(id)
+	// 运行时别名（failover 后失败通道 → 备用通道）只应用一次，防别名链。
+	if appCfg != nil && appCfg.AI.ChannelAliases != nil {
+		if target, ok := appCfg.AI.ChannelAliases[nid]; ok && strings.TrimSpace(target) != "" {
+			nid = config.NormalizeAIChannelID(target)
+		}
+	}
 	if appCfg != nil && appCfg.AI.Channels != nil {
 		if ch, ok := appCfg.AI.Channels[nid]; ok {
 			return ch.ToOpenAIConfig(), nid, true, nil

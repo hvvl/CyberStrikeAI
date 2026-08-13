@@ -858,6 +858,10 @@ type OpenAIConfig struct {
 type AIConfig struct {
 	DefaultChannel string                     `yaml:"default_channel,omitempty" json:"default_channel,omitempty"`
 	Channels       map[string]AIChannelConfig `yaml:"channels,omitempty" json:"channels,omitempty"`
+	// ChannelAliases 运行时通道别名：failover 后把「失败的通道 ID」重定向到备用通道，
+	// 使 Agent Markdown 里写死的 channel 在本请求后续分段续跑时解析到备用通道。
+	// 仅进程内每请求配置副本使用（configForAIChannel 拷贝），不持久化。
+	ChannelAliases map[string]string `yaml:"-" json:"-"`
 }
 
 type AIChannelConfig struct {

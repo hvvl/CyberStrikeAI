@@ -3,6 +3,7 @@ package multiagent
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -43,6 +44,9 @@ type RunResult struct {
 	EvidenceRefs         []string
 	PendingExecutionIDs  []string
 	MissingChecks        []string
+	// FailedChannelID 重试耗尽时实际失败的通道 ID（由 transport 层 429/5xx 响应登记判定）。
+	// 空表示无法判定（此时 handler 回退到会话通道处理 fallback）。
+	FailedChannelID string
 }
 
 // toolCallPendingInfo tracks a tool_call emitted to the UI so we can later
@@ -613,7 +617,7 @@ func RunDeepAgent(
 	}
 
 	retryAttempts, retryBackoffSec := ResolveEinoRunRetryArgs(&ma.EinoMiddleware, &appCfg.OpenAI)
-	return runEinoADKAgentLoop(ctx, &einoADKRunLoopArgs{
+	result, runErr := runEinoADKAgentLoop(ctx, &einoADKRunLoopArgs{
 		OrchMode:                orchMode,
 		OrchestratorName:        orchestratorName,
 		ConversationID:          conversationID,
@@ -641,6 +645,14 @@ func RunDeepAgent(
 		EmptyResponseMessage: "(Eino multi-agent orchestration completed but no assistant text was captured. Check process details or logs.) " +
 			"（Eino 多代理编排已完成，但未捕获到助手文本输出。请查看过程详情或日志。）",
 	}, baseMsgs)
+	if runErr != nil && result != nil && errors.Is(runErr, ErrRetryExhausted) {
+		// 重试耗尽：由 transport 层 429/5xx 响应登记判定实际失败的角色通道，
+		// 使 handler 的 failover 能按角色通道的 fallback_channel 定向切换。
+		if id := takeRecentFailedChannel(); id != "" {
+			result.FailedChannelID = id
+		}
+	}
+	return result, runErr
 }
 
 func chatToolCallsToSchema(tcs []agent.ToolCall) []schema.ToolCall {

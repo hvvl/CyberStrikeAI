@@ -31,6 +31,34 @@ type channelCooldownRegistry struct {
 
 var channelCooldowns = &channelCooldownRegistry{until: make(map[string]time.Time)}
 
+// channelFailedAt 记录每个通道最近一次「临时失败」的时间戳（429/5xx 响应经
+// retryAfterTransport 登记），用于 DeepAgent 重试耗尽时判定实际失败的角色通道。
+// 与 cooldown 不同，登记后不清除，靠 5s 有效期窗口避免误归属。
+var channelFailedAt sync.Map // channelID -> time.Time
+
+// takeRecentFailedChannel 返回 5s 窗口内最近失败的通道 ID（无则空）。
+func takeRecentFailedChannel() string {
+	deadline := time.Now().Add(-5 * time.Second)
+	var bestID string
+	var bestTime time.Time
+	channelFailedAt.Range(func(key, value interface{}) bool {
+		id, ok := key.(string)
+		if !ok {
+			return true
+		}
+		t, ok := value.(time.Time)
+		if !ok || t.Before(deadline) {
+			return true
+		}
+		if bestID == "" || t.After(bestTime) {
+			bestID = id
+			bestTime = t
+		}
+		return true
+	})
+	return bestID
+}
+
 // set 注册通道 cooldown；nowOrAfter 早于现值时不覆盖（多请求并发 429 时取最晚）。
 func (r *channelCooldownRegistry) set(channelID string, until time.Time) {
 	if channelID == "" {
@@ -112,10 +140,29 @@ func (t *retryAfterTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		}
 	}
 	resp, err := t.next.RoundTrip(req)
-	if err == nil && resp != nil && t.channelID != "" {
-		t.observeRateLimitResponse(resp)
+	if t.channelID != "" {
+		if err == nil && resp != nil {
+			// 限流响应：按 Retry-After 注册 cooldown；同时记录为失败通道供 failover 归属判定。
+			t.observeRateLimitResponse(resp)
+			switch resp.StatusCode {
+			case http.StatusTooManyRequests, http.StatusServiceUnavailable, 529:
+				noteFailedChannel(t.channelID)
+			default:
+				if resp.StatusCode >= 500 && resp.StatusCode <= 599 {
+					noteFailedChannel(t.channelID)
+				}
+			}
+		}
 	}
 	return resp, err
+}
+
+// noteFailedChannel 登记通道的最近一次临时失败（供 DeepAgent 完成时判定实际失败通道）。
+func noteFailedChannel(channelID string) {
+	if channelID == "" {
+		return
+	}
+	channelFailedAt.Store(channelID, time.Now())
 }
 
 // waitCooldown 阻塞至通道 cooldown 结束；ctx 取消立即返回。
