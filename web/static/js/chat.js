@@ -11283,7 +11283,8 @@ function renderContinueFailedList() {
 
     listEl.innerHTML = continueFailedItems.map(function (item) {
         const title = safeTruncateText(item.title || _cfT('continueFailedModal.untitled', '未命名会话'), 60);
-        const preview = item.errorPreview || '';
+        // 剥离机器可读分类标签（[api_failure:*]），只给用户看可读文本。
+        const preview = String(item.errorPreview || '').replace(/^\[api_failure:[^\]]*\]\s*/, '');
         const failedAt = formatFailedAt(item.failedAt);
         // 转义双引号用于 data- 属性；onclick 用 this.dataset 取，避免把 id 拼进 JS 字符串字面量导致引号提前闭合属性。
         const idAttr = escapeHtml(String(item.conversationId || '')).replace(/"/g, '&quot;');

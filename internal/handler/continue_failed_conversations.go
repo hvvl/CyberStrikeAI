@@ -39,11 +39,14 @@ func (h *AgentHandler) ListAPIFailedConversations(limit int) ([]*FailedConversat
 		return nil, fmt.Errorf("数据库未初始化")
 	}
 	// limit <= 0 表示不限制（用于"继续全部"）；limit > 0 时按条数截断。
+	// 分类过滤：仅收录带 [api_failure:*] 标签的重试耗尽错误（agentRunErrorMsg 打标签），
+	// 非重试型错误（鉴权失败/程序缺陷等）不入列，避免一键续跑重复执行必然失败的任务。
 	base := `
 SELECT c.id, c.title, c.agent_mode, pd.message, pd.created_at
 FROM conversations c
 JOIN process_details pd ON pd.conversation_id = c.id
 WHERE pd.event_type = 'error'
+  AND pd.message LIKE '` + apiFailureTagPrefix + `%'
   AND pd.rowid = (SELECT MAX(pd2.rowid) FROM process_details pd2 WHERE pd2.conversation_id = c.id)
 ORDER BY pd.created_at DESC`
 	var rows *sql.Rows
@@ -109,6 +112,7 @@ SELECT c.id, c.title, c.agent_mode, pd.message, pd.created_at
 FROM conversations c
 JOIN process_details pd ON pd.conversation_id = c.id
 WHERE pd.event_type = 'error'
+  AND pd.message LIKE '` + apiFailureTagPrefix + `%'
   AND pd.rowid = (SELECT MAX(pd2.rowid) FROM process_details pd2 WHERE pd2.conversation_id = c.id)
   AND c.id IN (` + strings.Join(placeholders, ",") + `)
 ORDER BY pd.created_at DESC`
@@ -439,7 +443,7 @@ func (h *AgentHandler) continueFailedConversation(conversationID string) {
 
 	if runErr != nil {
 		finishStatus = "failed"
-		errMsg := "执行失败: " + runErr.Error()
+		errMsg := agentRunErrorMsg(runErr)
 		if assistantMessageID != "" {
 			_, _ = h.db.Exec("UPDATE messages SET content = ?, updated_at = ? WHERE id = ?", errMsg, time.Now(), assistantMessageID)
 			_ = h.db.AddProcessDetail(assistantMessageID, conversationID, "error", errMsg, nil)

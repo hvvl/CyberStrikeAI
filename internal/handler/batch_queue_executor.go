@@ -396,7 +396,7 @@ func (h *AgentHandler) handleBatchSubTaskRunError(
 	}
 
 	h.logger.Error("批量任务执行失败", zap.String("queueId", queueID), zap.String("taskId", task.ID), zap.String("conversationId", conversationID), zap.Error(runErr))
-	errorMsg := "执行失败: " + runErr.Error()
+	errorMsg := agentRunErrorMsg(runErr)
 	if assistantMessageID != "" {
 		if _, updateErr := h.db.Exec(
 			"UPDATE messages SET content = ?, updated_at = ? WHERE id = ?",

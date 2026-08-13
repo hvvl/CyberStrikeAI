@@ -36,6 +36,23 @@ func newChannelFailoverState(initialChannelID string) *channelFailoverState {
 	return s
 }
 
+// apiFailureTagPrefix 失败分类标签：LLM 临时错误重试耗尽时在持久化消息前打前缀，
+// 使「API 调用失败会话」列表能按类别过滤（审计 M3），避免把非重试型错误
+// （鉴权失败、程序缺陷、超时等）误当成可续跑的 API 故障。
+const apiFailureTagPrefix = "[api_failure:llm_transient_retry_exhausted]"
+
+// agentRunErrorMsg 构造执行失败消息；重试耗尽类错误打分类标签。
+func agentRunErrorMsg(runErr error) string {
+	msg := ""
+	if runErr != nil {
+		msg = runErr.Error()
+	}
+	if runErr != nil && errors.Is(runErr, multiagent.ErrRetryExhausted) {
+		return apiFailureTagPrefix + " 执行失败: " + msg
+	}
+	return "执行失败: " + msg
+}
+
 // resolveChannelFailoverTarget 计算失败通道对应的 fallback 通道 ID（空=不降级）。
 // 失败通道非会话通道时优先用该通道自己的 fallback_channel，缺省回退会话通道的 fallback；
 // 失败通道为空或等于会话通道时维持原有「会话通道 fallback」语义。

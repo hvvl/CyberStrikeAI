@@ -1,9 +1,13 @@
 package handler
 
 import (
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"cyberstrike-ai/internal/config"
+	"cyberstrike-ai/internal/multiagent"
 )
 
 func testCfgWithChannels() *config.Config {
@@ -74,5 +78,37 @@ func TestResolveChannelFailoverTargetNoFallbackAnywhere(t *testing.T) {
 func TestResolveChannelFailoverTargetNilCfg(t *testing.T) {
 	if got := resolveChannelFailoverTarget(nil, "x"); got != "" {
 		t.Fatalf("nil cfg should return empty, got %q", got)
+	}
+}
+
+func TestAgentRunErrorMsgTagging(t *testing.T) {
+	// 重试耗尽错误 → 打 [api_failure:*] 分类标签
+	exhausted := fmt.Errorf("exhausted: %w: %w", multiagent.ErrRetryExhausted, errors.New("boom"))
+	got := agentRunErrorMsg(exhausted)
+	if !strings.HasPrefix(got, apiFailureTagPrefix) {
+		t.Fatalf("exhausted error should be tagged, got %q", got)
+	}
+	if !strings.Contains(got, "执行失败") || !strings.Contains(got, "boom") {
+		t.Fatalf("tagged message should keep context, got %q", got)
+	}
+	// 普通错误 → 不打标签
+	plain := agentRunErrorMsg(errors.New("auth failed"))
+	if strings.HasPrefix(plain, apiFailureTagPrefix) {
+		t.Fatalf("plain error should not be tagged, got %q", plain)
+	}
+	if !strings.HasPrefix(plain, "执行失败: ") {
+		t.Fatalf("plain error format wrong: %q", plain)
+	}
+	// nil → 不打标签
+	if got := agentRunErrorMsg(nil); strings.HasPrefix(got, apiFailureTagPrefix) {
+		t.Fatalf("nil error should not be tagged, got %q", got)
+	}
+	// errors.Is 语义：标签判定依赖 ErrRetryExhausted 的包裹链
+	wrapped := fmt.Errorf("outer: %w", exhausted)
+	if !errors.Is(wrapped, multiagent.ErrRetryExhausted) {
+		t.Fatal("test fixture should preserve ErrRetryExhausted via %w chain")
+	}
+	if got := agentRunErrorMsg(wrapped); !strings.HasPrefix(got, apiFailureTagPrefix) {
+		t.Fatalf("wrapped exhausted error should be tagged, got %q", got)
 	}
 }

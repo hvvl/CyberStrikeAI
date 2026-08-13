@@ -696,7 +696,7 @@ func (h *AgentHandler) finalizeRobotAgentError(ctx context.Context, assistantMes
 	if shouldPersistEinoAgentTraceAfterRunError(ctx) {
 		h.persistEinoAgentTraceForResume(conversationID, resultMA)
 	}
-	errMsg := "执行失败: " + errMA.Error()
+	errMsg := agentRunErrorMsg(errMA)
 	if assistantMessageID != "" {
 		_, _ = h.db.Exec("UPDATE messages SET content = ?, updated_at = ? WHERE id = ?", errMsg, time.Now(), assistantMessageID)
 		_ = h.db.AddProcessDetail(assistantMessageID, conversationID, "error", errMsg, nil)
@@ -1747,7 +1747,7 @@ type BatchTaskRequest struct {
 	CronExpr     string   `json:"cronExpr,omitempty"`       // scheduleMode=cron 时必填
 	ExecuteNow   bool     `json:"executeNow,omitempty"`     // 创建后是否立即执行（默认 false）
 	ProjectID    string   `json:"projectId,omitempty"`      // 队列内子对话绑定的项目（可选）
-	AIChannelID string   `json:"aiChannelId,omitempty"`    // 队列绑定的 AI 通道 ID（可选，空=跟随全局默认）
+	AIChannelID  string   `json:"aiChannelId,omitempty"`    // 队列绑定的 AI 通道 ID（可选，空=跟随全局默认）
 	Concurrency  int      `json:"concurrency,omitempty"`    // 同时执行的子任务数，默认 1，最大 8
 }
 
