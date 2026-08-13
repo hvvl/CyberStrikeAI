@@ -1014,6 +1014,10 @@ func setupRoutes(
 		// 批量任务管理
 		protected.POST("/batch-tasks", agentHandler.CreateBatchQueue)
 		protected.GET("/batch-tasks", agentHandler.ListBatchQueues)
+		// CSV 批量派发（静态段必须注册在 :queueId 参数段之前）
+		protected.POST("/batch-tasks/dispatch", agentHandler.DispatchBatchTasks)
+		protected.POST("/batch-tasks/group/:groupId/start", agentHandler.StartBatchGroup)
+		protected.POST("/batch-tasks/group/:groupId/cancel", agentHandler.CancelBatchGroup)
 		protected.GET("/batch-tasks/:queueId", agentHandler.GetBatchQueue)
 		protected.POST("/batch-tasks/:queueId/start", agentHandler.StartBatchQueue)
 		protected.POST("/batch-tasks/:queueId/rerun", agentHandler.RerunBatchQueue)

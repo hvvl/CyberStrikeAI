@@ -3,14 +3,18 @@ package handler
 import (
 	"encoding/csv"
 	"fmt"
+	"net/http"
 	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/gin-gonic/gin"
 	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"cyberstrike-ai/internal/config"
+	"cyberstrike-ai/internal/database"
+	"cyberstrike-ai/internal/security"
 )
 
 const (
@@ -288,4 +292,135 @@ func distributeBatchMessages(msgs []string, plans []BatchDispatchQueuePlan, mode
 		}
 	}
 	return out, nil
+}
+
+// buildBatchDispatch 从请求构造派发结果：解析 CSV → 渲染 → 分发 → 创建队列（供 HTTP 与 MCP 共用）。
+func (h *AgentHandler) buildBatchDispatch(req *BatchDispatchRequest, userID string) (*BatchDispatchResponse, error) {
+	normalizeBatchDispatch(req)
+	if err := validateBatchDispatch(req); err != nil {
+		return nil, err
+	}
+
+	rows, err := parseBatchCSV(&req.CSV)
+	if err != nil {
+		return nil, err
+	}
+	msgs, skipped, err := renderBatchMessages(req.Template, req.Placeholders, rows, req.CSV.EmptyCellPolicy)
+	if err != nil {
+		return nil, err
+	}
+	if len(msgs) == 0 {
+		return nil, fmt.Errorf("渲染后没有有效任务（检查列映射、空单元格策略或 CSV 内容）")
+	}
+	perQueue, err := distributeBatchMessages(msgs, req.Queues, req.DistributeMode)
+	if err != nil {
+		return nil, err
+	}
+
+	groupID := generateShortID()
+	resp := &BatchDispatchResponse{GroupID: groupID, TotalTasks: len(msgs), SkippedRows: skipped}
+	for i, plan := range req.Queues {
+		qTitle := strings.TrimSpace(plan.Title)
+		if qTitle == "" {
+			base := strings.TrimSpace(req.Title)
+			if base == "" {
+				base = "批量派发"
+			}
+			qTitle = fmt.Sprintf("%s #%d", base, i+1)
+		}
+		queue, createErr := h.batchTaskManager.CreateBatchQueue(qTitle, plan.Role, plan.AgentMode, "manual", "", req.ProjectID, plan.AIChannelID, nil, plan.Concurrency, perQueue[i])
+		if createErr != nil {
+			return nil, fmt.Errorf("创建队列 %d 失败: %w", i+1, createErr)
+		}
+		h.batchTaskManager.SetQueueGroup(queue.ID, groupID)
+		if h.db != nil {
+			if userID != "" {
+				_ = h.db.SetResourceOwner("batch_task", queue.ID, userID)
+				_ = h.db.AssignResourceToUser(userID, "batch_task", queue.ID)
+			}
+		}
+		item := BatchDispatchQueueResult{QueueID: queue.ID, TaskCount: len(queue.Tasks), Started: false}
+		if req.ExecuteNow {
+			ok, startErr := h.startBatchQueueExecution(queue.ID, false)
+			if ok && startErr == nil {
+				item.Started = true
+			}
+		}
+		resp.Queues = append(resp.Queues, item)
+	}
+	return resp, nil
+}
+
+// DispatchBatchTasks 处理 CSV 批量派发请求。
+func (h *AgentHandler) DispatchBatchTasks(c *gin.Context) {
+	var req BatchDispatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	session, sessionOK := security.CurrentSession(c)
+	if sessionOK && h.db != nil && session.Scope != database.RBACScopeAll && strings.TrimSpace(req.ProjectID) != "" {
+		if !h.db.UserCanAccessResource(session.UserID, session.Scope, "project", strings.TrimSpace(req.ProjectID)) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "无权在该项目下创建批量任务"})
+			return
+		}
+	}
+	userID := ""
+	if sessionOK {
+		userID = session.UserID
+	}
+	resp, err := h.buildBatchDispatch(&req, userID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.audit != nil {
+		h.audit.RecordOK(c, "task", "dispatch_queue", "CSV批量派发任务", "batch_group", resp.GroupID, map[string]interface{}{
+			"task_count": resp.TotalTasks, "queue_count": len(resp.Queues), "skipped": resp.SkippedRows, "started": req.ExecuteNow,
+		})
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// StartBatchGroup 启动派发组内所有 pending/paused 队列。
+func (h *AgentHandler) StartBatchGroup(c *gin.Context) {
+	groupID := c.Param("groupId")
+	ids, err := h.db.ListBatchQueueIDsByGroup(groupID)
+	if err != nil || len(ids) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "派发组不存在或无队列"})
+		return
+	}
+	started := 0
+	for _, id := range ids {
+		if q, ok := h.batchTaskManager.GetBatchQueue(id); ok {
+			if q.Status == BatchQueueStatusPending || q.Status == BatchQueueStatusPaused {
+				h.batchTaskManager.ClearSingleRunTask(id)
+				if ok, startErr := h.startBatchQueueExecution(id, false); ok && startErr == nil {
+					started++
+				}
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"groupId": groupID, "started": started})
+}
+
+// CancelBatchGroup 取消派发组内所有 running/paused 队列。
+func (h *AgentHandler) CancelBatchGroup(c *gin.Context) {
+	groupID := c.Param("groupId")
+	ids, err := h.db.ListBatchQueueIDsByGroup(groupID)
+	if err != nil || len(ids) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "派发组不存在或无队列"})
+		return
+	}
+	cancelled := 0
+	for _, id := range ids {
+		if q, ok := h.batchTaskManager.GetBatchQueue(id); ok {
+			if q.Status == BatchQueueStatusRunning || q.Status == BatchQueueStatusPaused {
+				if h.batchTaskManager.CancelQueue(id) {
+					cancelled++
+				}
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"groupId": groupID, "cancelled": cancelled})
 }
