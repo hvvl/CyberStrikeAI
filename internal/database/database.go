@@ -475,7 +475,8 @@ func (db *DB) initTables() error {
 		started_at DATETIME,
 		completed_at DATETIME,
 		current_index INTEGER NOT NULL DEFAULT 0,
-		ai_channel_id TEXT
+		ai_channel_id TEXT,
+		batch_group_id TEXT
 	);`
 
 	// 创建批量任务表
@@ -1455,6 +1456,25 @@ func (db *DB) migrateBatchTaskQueuesTable() error {
 	} else if aiChannelIDCount == 0 {
 		if _, err := db.Exec("ALTER TABLE batch_task_queues ADD COLUMN ai_channel_id TEXT"); err != nil {
 			db.logger.Warn("添加batch_task_queues.ai_channel_id字段失败", zap.Error(err))
+		}
+	}
+
+	var batchGroupIDCount int
+	err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('batch_task_queues') WHERE name='batch_group_id'").Scan(&batchGroupIDCount)
+	if err != nil {
+		if _, addErr := db.Exec("ALTER TABLE batch_task_queues ADD COLUMN batch_group_id TEXT"); addErr != nil {
+			errMsg := strings.ToLower(addErr.Error())
+			if !strings.Contains(errMsg, "duplicate column") && !strings.Contains(errMsg, "already exists") {
+				db.logger.Warn("添加batch_task_queues.batch_group_id字段失败", zap.Error(addErr))
+			}
+		}
+	} else if batchGroupIDCount == 0 {
+		if _, err := db.Exec("ALTER TABLE batch_task_queues ADD COLUMN batch_group_id TEXT"); err != nil {
+			db.logger.Warn("添加batch_task_queues.batch_group_id字段失败", zap.Error(err))
+		} else {
+			if _, idxErr := db.Exec("CREATE INDEX IF NOT EXISTS idx_batch_task_queues_group ON batch_task_queues(batch_group_id)"); idxErr != nil {
+				db.logger.Warn("创建batch_task_queues.batch_group_id索引失败", zap.Error(idxErr))
+			}
 		}
 	}
 

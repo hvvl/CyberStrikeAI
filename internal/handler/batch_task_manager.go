@@ -83,7 +83,8 @@ type BatchTaskQueue struct {
 	LastScheduleError     string       `json:"lastScheduleError,omitempty"`
 	LastRunError          string       `json:"lastRunError,omitempty"`
 	ProjectID             string       `json:"projectId,omitempty"`
-	AIChannelID           string       `json:"aiChannelId,omitempty"` // 队列绑定的 AI 通道 ID（空=跟随全局默认）
+	AIChannelID           string       `json:"aiChannelId,omitempty"`  // 队列绑定的 AI 通道 ID（空=跟随全局默认）
+	BatchGroupID          string       `json:"batchGroupId,omitempty"` // CSV 派发组 ID（空=非派发创建的队列）
 	Concurrency           int          `json:"concurrency"` // 同时执行的子任务数，默认 1
 	Tasks                 []*BatchTask `json:"tasks"`
 	Status                string       `json:"status"` // pending, running, paused, completed, cancelled
@@ -167,6 +168,20 @@ func (m *BatchTaskManager) SetDB(db *database.DB) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.db = db
+}
+
+// SetQueueGroup 设置队列所属派发组（同步更新内存与数据库，DB 失败仅告警不阻断派发）。
+func (m *BatchTaskManager) SetQueueGroup(queueID, groupID string) {
+	m.mu.Lock()
+	if q, ok := m.queues[queueID]; ok {
+		q.BatchGroupID = strings.TrimSpace(groupID)
+	}
+	m.mu.Unlock()
+	if m.db != nil {
+		if err := m.db.UpdateBatchQueueGroup(queueID, groupID); err != nil {
+			m.logger.Warn("queue group persist failed", zap.String("queueId", queueID), zap.Error(err))
+		}
+	}
 }
 
 // normalizeBatchQueueConcurrency 规范化队列并发数。
@@ -354,6 +369,9 @@ func (m *BatchTaskManager) loadQueueFromDB(queueID string) *BatchTaskQueue {
 	}
 	if queueRow.AIChannelID.Valid {
 		queue.AIChannelID = strings.TrimSpace(queueRow.AIChannelID.String)
+	}
+	if queueRow.BatchGroupID.Valid {
+		queue.BatchGroupID = strings.TrimSpace(queueRow.BatchGroupID.String)
 	}
 	queue.Concurrency = batchQueueConcurrencyFromRow(queueRow)
 	if queueRow.StartedAt.Valid {
