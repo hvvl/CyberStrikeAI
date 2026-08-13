@@ -158,9 +158,10 @@ func (h *AgentHandler) EinoSingleAgentLoopStream(c *gin.Context) {
 		sendEvent("done", "", map[string]interface{}{"conversationId": conversationID})
 		return
 	}
-	_ = resolvedAIChannelID
+	// 持久化本次请求实际使用的 AI 通道（审计 P2-5：续跑按原会话通道执行）。
+	h.persistConversationAIChannel(conversationID, resolvedAIChannelID)
 	// 跨通道 failover：跟踪本请求已尝试的通道，防止 fallback 链成环。
-	channelFailover := newChannelFailoverState(runCfg.AI.DefaultChannel)
+	channelFailover := newChannelFailoverState()
 
 	var result *multiagent.RunResult
 	var runErr error
@@ -446,13 +447,15 @@ func (h *AgentHandler) EinoSingleAgentLoop(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器配置未加载"})
 		return
 	}
-	runCfg, _, err := h.configForAIChannel(req.AIChannelID)
+	runCfg, resolvedAIChannelID, err := h.configForAIChannel(req.AIChannelID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// 持久化本次请求实际使用的 AI 通道（审计 P2-5：续跑按原会话通道执行）。
+	h.persistConversationAIChannel(prep.ConversationID, resolvedAIChannelID)
 	// 跨通道 failover：跟踪本请求已尝试的通道，防止 fallback 链成环。
-	channelFailover := newChannelFailoverState(runCfg.AI.DefaultChannel)
+	channelFailover := newChannelFailoverState()
 
 	curHist := prep.History
 	curMsg := prep.FinalMessage

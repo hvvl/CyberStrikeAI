@@ -91,11 +91,11 @@ ai:
 
 - **重试次数与退避**：默认 6 次、单次退避上限 30 秒（equal-jitter 指数退避）。全局值在 `multi_agent.eino_middleware.run_retry_max_attempts` / `run_retry_max_backoff_sec`，通道级字段（见上表）优先于全局。
 - **Retry-After**：响应头带 `Retry-After`（429/503 等）时，该通道在指定时长内进入冷却（单次冷却硬上限 120 秒），新请求等待冷却结束再发出；等待不占用通道并发额度。
-- **跨通道降级**：通道配置 `fallback_channel` 后，本通道重试耗尽会自动切换到备用通道分段续跑（已完成的工具调用进度保留，不会从头重跑）。最多切换一次，`fallback_channel` 链成环会被自动截断。失败通道由 HTTP Transport 层（429/5xx 响应）判定归属：**角色通道失败时优先使用该通道自己的 `fallback_channel`**，降级后本请求内该通道被重定向到备用通道（Agent Markdown 中显式写死的 `channel` 也会解析到备用通道）；失败通道未配置 `fallback_channel` 时回退会话通道的降级配置。
+- **跨通道降级**：通道配置 `fallback_channel` 后，本通道重试耗尽会自动切换到备用通道分段续跑（已完成的工具调用进度保留，不会从头重跑）。最多切换一次，`fallback_channel` 链成环会被自动截断。失败通道由 HTTP Transport 层判定归属（429/5xx 响应与网络类临时错误如连接重置/拒连/DNS 失败都会登记，登记进**本次 run 专属的收集器**，并发会话互不串扰）：**角色通道失败时优先使用该通道自己的 `fallback_channel`，且只重定向该角色通道**——会话主通道（模型/密钥/端点/并发/重试策略）保持不变，降级后 Agent Markdown 中显式绑定失败通道的 `channel` 会解析到备用通道（`cheap.fallback_channel: strong` 这类“降级回会话通道”的配置同样支持）；失败通道未配置 `fallback_channel` 时回退会话通道的降级配置；会话通道自身失败时整个会话切换。
 
 > **已知限制**：
-> - **多 Agent 角色通道的重试次数归属**：子 Agent 显式指定 `channel` 后，其 HTTP 请求（含并发限流、Retry-After 冷却）与 failover 降级目标都按子通道处理，但外层**重试次数/退避节奏**仍按会话通道（`ai.default_channel`）的配置计算（run loop 是会话级重试层，无法同时套用多套节奏）。子通道的 `run_retry_max_attempts` / `run_retry_max_backoff_sec` 会在该通道作为会话通道时生效。另外，多会话并发且多通道同时失败时，失败通道归属按「最近失败」启发式判定，存在极小概率的跨会话误归属。
-> - **后台续跑的执行身份**：一键继续失败会话的后台 worker 以会话所有者（conversation owner）身份执行 Agent，与 `batch_queue_executor` 的既定委托模式一致。若需要更严格的权限隔离（如继承入队发起者权限），需统一调整所有后台批处理路径。
+> - **多 Agent 角色通道的重试次数归属**：子 Agent 显式指定 `channel` 后，其 HTTP 请求（含并发限流、Retry-After 冷却）与 failover 降级目标都按子通道处理，但外层**重试次数/退避节奏**仍按会话通道（`ai.default_channel`）的配置计算（run loop 是会话级重试层，无法同时套用多套节奏）。子通道的 `run_retry_max_attempts` / `run_retry_max_backoff_sec` 会在该通道作为会话通道时生效。
+> - **后台续跑的执行身份**：一键继续失败会话的后台 worker 以会话所有者（conversation owner）身份执行 Agent，与 `batch_queue_executor` 的既定委托模式一致。若需要更严格的权限隔离（如继承入队发起者权限），需统一调整所有后台批处理路径。续跑按**会话创建/最近使用时绑定的 AI 通道**执行（`conversations.ai_channel_id`），若该通道已被管理员删除，续跑会明确提示并回退默认通道，而不是静默换模型。
 > - **failover 后迭代预算**：跨通道分段续跑的每一段会重新取 `agent.max_iterations` 作为该段上限，因此整任务的总迭代数可能达到配置值的 2 倍。`max_iterations` 的语义是"每段上限"而非"整任务硬上限"。
 - **一键继续失败会话**：对话侧边栏“最近对话”旁的“继续失败的会话”按钮列出所有因 LLM API 临时故障（限流/上游 5xx/网络抖动）重试耗尽而中断的会话（错误消息带机器可读分类标签 `[api_failure:*]`，非重试型错误不会入列），支持单个或全部加入后台续跑队列，进度通过任务事件实时推送。对应 API：`GET /api/agent-loop/failed`、`POST /api/agent-loop/continue-failed`（需 `tasks:write` 权限，与批量任务管理一致）。
 

@@ -398,7 +398,8 @@ func (h *AgentHandler) continueFailedConversation(conversationID string) {
 	taskCtx = mcp.WithToolRunRegistry(taskCtx, h.tasks)
 	taskCtx = mcp.WithEinoExecuteRunRegistry(taskCtx, h.tasks)
 
-	// 按会话的 agent_mode 选择执行器；通道走默认路由，重试耗尽时经 tryChannelFailover 分段续跑。
+	// 按会话的 agent_mode 选择执行器；续跑优先使用会话绑定的 AI 通道（审计 P2-5：
+	// 此前一律走全局默认，用户手动选的通道/模型/限额/fallback 链在续跑时全部丢失）。
 	mode := strings.TrimSpace(strings.ToLower(conv.AgentMode))
 	useMulti := h.config.MultiAgent.Enabled && mode != "" && mode != "eino_single"
 	orch := "deep"
@@ -406,40 +407,45 @@ func (h *AgentHandler) continueFailedConversation(conversationID string) {
 		orch = config.NormalizeMultiAgentOrchestration(mode)
 	}
 
+	convChannel := ""
+	if h.db != nil {
+		if cid, cerr := h.db.GetConversationAIChannel(conversationID); cerr == nil {
+			convChannel = strings.TrimSpace(cid)
+		}
+	}
+	if convChannel != "" {
+		if verr := h.validateAIChannelExists(convChannel); verr != nil {
+			// 原会话通道已被删除/改名：明确告知并回退默认，而不是默默换模型。
+			notice := fmt.Sprintf("原会话使用的 AI 通道 %q 已不存在，本次续跑将使用默认通道。", convChannel)
+			log.Warn("续跑失败会话：会话通道不存在，回退默认", zap.String("aiChannelId", convChannel), zap.Error(verr))
+			h.publishContinueFailedEvent(conversationID, "continue_failed_channel_missing", notice, map[string]interface{}{
+				"conversationId": conversationID,
+				"aiChannelId":    convChannel,
+			})
+			convChannel = ""
+		}
+	}
+
 	// 后台续跑与普通聊天入口一致：重试耗尽 → fallback_channel 分段续跑（复用同一套 failover 循环）。
-	runCfg, _, cfgErr := h.configForAIChannel("")
+	runCfg, _, cfgErr := h.configForAIChannel(convChannel)
 	if cfgErr != nil {
 		log.Warn("续跑失败会话：解析通道配置失败", zap.Error(cfgErr))
 		runCfg = h.config
 	}
-	failover := newChannelFailoverState(runCfg.AI.DefaultChannel)
 	curHistory := history
 
-	var result *multiagent.RunResult
-	var runErr error
-	for {
+	result, runErr := h.runAgentWithChannelFailover(runCfg, conversationID, &curHistory, func(eventType, message string, data interface{}) {
+		h.publishContinueFailedEvent(conversationID, eventType, message, data)
+	}, baseCtx, func(segCfg *config.Config) (*multiagent.RunResult, error) {
 		if useMulti {
-			result, runErr = multiagent.RunDeepAgent(taskCtx, runCfg, &runCfg.MultiAgent, h.agent, h.db, h.logger,
+			return multiagent.RunDeepAgent(taskCtx, segCfg, &segCfg.MultiAgent, h.agent, h.db, h.logger,
 				conversationID, h.conversationProjectID(conversationID), continueFailedContinuePrompt, curHistory, roleTools,
 				progressCallback, h.agentsMarkdownDir, orch, nil, h.agentSessionContextBlock(conversationID))
-		} else {
-			result, runErr = multiagent.RunEinoSingleChatModelAgent(taskCtx, runCfg, &runCfg.MultiAgent, h.agent, h.db, h.logger,
-				conversationID, h.conversationProjectID(conversationID), continueFailedContinuePrompt, curHistory, roleTools,
-				progressCallback, nil, h.agentSessionContextBlock(conversationID))
 		}
-		if runErr == nil {
-			break
-		}
-		if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {
-			h.persistEinoAgentTraceForResume(conversationID, result)
-		}
-		if h.tryChannelFailover(runErr, failedChannelIDFromResult(result), &runCfg, failover, conversationID, &curHistory, func(eventType, message string, data interface{}) {
-			h.publishContinueFailedEvent(conversationID, eventType, message, data)
-		}) {
-			continue
-		}
-		break
-	}
+		return multiagent.RunEinoSingleChatModelAgent(taskCtx, segCfg, &segCfg.MultiAgent, h.agent, h.db, h.logger,
+			conversationID, h.conversationProjectID(conversationID), continueFailedContinuePrompt, curHistory, roleTools,
+			progressCallback, nil, h.agentSessionContextBlock(conversationID))
+	})
 
 	if runErr != nil {
 		finishStatus = "failed"

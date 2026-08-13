@@ -753,6 +753,33 @@ func (db *DB) GetConversationTitle(id string) (string, error) {
 	return title, nil
 }
 
+// GetConversationAIChannel 获取对话绑定的 AI 通道 ID（空=跟随默认通道；用于续跑失败会话按原通道续跑，审计 P2-5）。
+// 未设置过通道时列值为 NULL，返回空串。
+func (db *DB) GetConversationAIChannel(id string) (string, error) {
+	var channelID sql.NullString
+	err := db.QueryRow("SELECT ai_channel_id FROM conversations WHERE id = ?", id).Scan(&channelID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("对话不存在")
+		}
+		return "", fmt.Errorf("查询对话 AI 通道失败: %w", err)
+	}
+	return channelID.String, nil
+}
+
+// SetConversationAIChannel 持久化对话当前使用的 AI 通道（每次聊天请求按实际解析通道写入，
+// 用户切换通道后续跑即按新通道执行）。不更新 updated_at，避免干扰会话排序。
+func (db *DB) SetConversationAIChannel(id, channelID string) error {
+	_, err := db.Exec(
+		"UPDATE conversations SET ai_channel_id = ? WHERE id = ?",
+		strings.TrimSpace(channelID), id,
+	)
+	if err != nil {
+		return fmt.Errorf("更新对话 AI 通道失败: %w", err)
+	}
+	return nil
+}
+
 // UpdateConversationTitle 更新对话标题
 func (db *DB) UpdateConversationTitle(id, title string) error {
 	// 注意：不更新 updated_at，因为重命名操作不应该改变对话的更新时间

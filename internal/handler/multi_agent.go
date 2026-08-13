@@ -159,14 +159,16 @@ func (h *AgentHandler) MultiAgentLoopStream(c *gin.Context) {
 
 	stopKeepalive := runSSEKeepalive(c, &sseWriteMu)
 	defer stopKeepalive()
-	runCfg, _, err := h.configForAIChannel(req.AIChannelID)
+	runCfg, resolvedAIChannelID, err := h.configForAIChannel(req.AIChannelID)
 	if err != nil {
 		sendEvent("error", err.Error(), nil)
 		sendEvent("done", "", map[string]interface{}{"conversationId": conversationID})
 		return
 	}
+	// 持久化本次请求实际使用的 AI 通道（审计 P2-5：续跑按原会话通道执行）。
+	h.persistConversationAIChannel(conversationID, resolvedAIChannelID)
 	// 跨通道 failover：跟踪本请求已尝试的通道，防止 fallback 链成环。
-	channelFailover := newChannelFailoverState(runCfg.AI.DefaultChannel)
+	channelFailover := newChannelFailoverState()
 
 	var result *multiagent.RunResult
 	var runErr error
@@ -455,13 +457,15 @@ func (h *AgentHandler) MultiAgentLoop(c *gin.Context) {
 	taskCtx = multiagent.WithHITLToolInterceptor(taskCtx, func(ctx context.Context, toolName, arguments string) (string, error) {
 		return h.interceptHITLForEinoTool(ctx, cancelWithCause, prep.ConversationID, prep.AssistantMessageID, nil, toolName, arguments)
 	})
-	runCfg, _, err := h.configForAIChannel(req.AIChannelID)
+	runCfg, resolvedAIChannelID, err := h.configForAIChannel(req.AIChannelID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// 持久化本次请求实际使用的 AI 通道（审计 P2-5：续跑按原会话通道执行）。
+	h.persistConversationAIChannel(prep.ConversationID, resolvedAIChannelID)
 	// 跨通道 failover：跟踪本请求已尝试的通道，防止 fallback 链成环。
-	channelFailover := newChannelFailoverState(runCfg.AI.DefaultChannel)
+	channelFailover := newChannelFailoverState()
 
 	curHist := prep.History
 	curMsg := prep.FinalMessage

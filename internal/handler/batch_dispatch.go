@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"cyberstrike-ai/internal/config"
@@ -339,6 +340,10 @@ func (h *AgentHandler) buildBatchDispatch(req *BatchDispatchRequest, userID stri
 		if len(perQueue[i]) > MaxBatchTasksPerQueue {
 			return nil, fmt.Errorf("队列 %d 任务数 %d 超过单队列上限 %d", i+1, len(perQueue[i]), MaxBatchTasksPerQueue)
 		}
+		// 通道存在性校验（审计 P2-6：不存在的通道直接失败，不静默换默认模型）。
+		if chErr := h.validateAIChannelExists(plan.AIChannelID); chErr != nil {
+			return nil, fmt.Errorf("队列 %d AI 通道无效: %w", i+1, chErr)
+		}
 		queueTitles[i] = qTitle
 	}
 
@@ -361,12 +366,21 @@ func (h *AgentHandler) buildBatchDispatch(req *BatchDispatchRequest, userID stri
 		}
 		created = append(created, queue)
 	}
-	// 第二步：落组 + 落 owner（全部成功后才进入启动阶段）。
+	// 第二步：落组 + 落 owner（全部成功后才进入启动阶段；任一步失败回滚已创建队列，审计 P2/P3-7）。
 	for _, q := range created {
-		h.batchTaskManager.SetQueueGroup(q.ID, groupID)
+		if err := h.batchTaskManager.SetQueueGroup(q.ID, groupID); err != nil {
+			h.logger.Error("批量派发落组失败，回滚", zap.String("queueId", q.ID), zap.String("groupId", groupID), zap.Error(err))
+			return rollback(fmt.Errorf("队列 %s 落组失败: %w", q.ID, err))
+		}
 		if h.db != nil && userID != "" {
-			_ = h.db.SetResourceOwner("batch_task", q.ID, userID)
-			_ = h.db.AssignResourceToUser(userID, "batch_task", q.ID)
+			if err := h.db.SetResourceOwner("batch_task", q.ID, userID); err != nil {
+				h.logger.Error("批量派发 owner 持久化失败，回滚", zap.String("queueId", q.ID), zap.Error(err))
+				return rollback(fmt.Errorf("队列 %s owner 持久化失败: %w", q.ID, err))
+			}
+			if err := h.db.AssignResourceToUser(userID, "batch_task", q.ID); err != nil {
+				h.logger.Error("批量派发用户分配持久化失败，回滚", zap.String("queueId", q.ID), zap.Error(err))
+				return rollback(fmt.Errorf("队列 %s 用户分配持久化失败: %w", q.ID, err))
+			}
 		}
 	}
 	// 第三步：统一启动。

@@ -12,6 +12,7 @@ package multiagent
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"sync"
@@ -22,6 +23,53 @@ import (
 // （如代理错误返回几天后的时间）导致通道长时间不可用。
 const retryAfterMaxCooldown = 120 * time.Second
 
+// failedChannelCollector 一次 run 内的失败通道收集器（请求级，挂在 ctx 上）。
+// 相比进程级「最近 5 秒失败」启发式，它天然按 run 隔离：并发会话 A/B 各自
+// 携带自己的 collector，A 的 429 不会被 B 的 500 顶掉（审计 P1-3）。
+type failedChannelCollector struct {
+	mu        sync.Mutex
+	channelID string
+	at        time.Time
+}
+
+func (c *failedChannelCollector) note(channelID string) {
+	if c == nil || channelID == "" {
+		return
+	}
+	c.mu.Lock()
+	c.channelID = channelID
+	c.at = time.Now()
+	c.mu.Unlock()
+}
+
+// take 返回本 run 内最近登记的失败通道 ID（无则空）。
+func (c *failedChannelCollector) take() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.channelID
+}
+
+type failedChannelCollectorKey struct{}
+
+// withFailedChannelCollector 把新的 collector 挂到 ctx（派生 ctx 天然继承）。
+func withFailedChannelCollector(ctx context.Context) (context.Context, *failedChannelCollector) {
+	c := &failedChannelCollector{}
+	return context.WithValue(ctx, failedChannelCollectorKey{}, c), c
+}
+
+func failedChannelCollectorFromContext(ctx context.Context) *failedChannelCollector {
+	if ctx == nil {
+		return nil
+	}
+	if c, ok := ctx.Value(failedChannelCollectorKey{}).(*failedChannelCollector); ok {
+		return c
+	}
+	return nil
+}
+
 // channelCooldownRegistry 按通道 ID 记录「最早可再发请求」的时刻。
 // 进程级单例：同一通道的主代理/子代理/summarization/不同会话共享。
 type channelCooldownRegistry struct {
@@ -31,12 +79,11 @@ type channelCooldownRegistry struct {
 
 var channelCooldowns = &channelCooldownRegistry{until: make(map[string]time.Time)}
 
-// channelFailedAt 记录每个通道最近一次「临时失败」的时间戳（429/5xx 响应经
-// retryAfterTransport 登记），用于 DeepAgent 重试耗尽时判定实际失败的角色通道。
-// 与 cooldown 不同，登记后不清除，靠 5s 有效期窗口避免误归属。
+// channelFailedAt 记录每个通道最近一次「临时失败」的时间戳（进程级兜底，仅在
+// ctx 未携带 collector 的路径使用）。主归属路径是 run 级 collector。
 var channelFailedAt sync.Map // channelID -> time.Time
 
-// takeRecentFailedChannel 返回 5s 窗口内最近失败的通道 ID（无则空）。
+// takeRecentFailedChannel 返回 5s 窗口内最近失败的通道 ID（无则空）。仅作兜底。
 func takeRecentFailedChannel() string {
 	deadline := time.Now().Add(-5 * time.Second)
 	var bestID string
@@ -146,18 +193,36 @@ func (t *retryAfterTransport) RoundTrip(req *http.Request) (*http.Response, erro
 			t.observeRateLimitResponse(resp)
 			switch resp.StatusCode {
 			case http.StatusTooManyRequests, http.StatusServiceUnavailable, 529:
-				noteFailedChannel(t.channelID)
+				noteFailedChannelCtx(req.Context(), t.channelID)
 			default:
 				if resp.StatusCode >= 500 && resp.StatusCode <= 599 {
-					noteFailedChannel(t.channelID)
+					noteFailedChannelCtx(req.Context(), t.channelID)
 				}
 			}
+		} else if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			// 网络类临时错误（connection reset/refused、dial tcp、TLS 超时、EOF、DNS 等）
+			// 同样登记失败通道：run loop 把它们当作可重试，重试耗尽时必须能归到
+			// 实际出错的角色通道，否则 FailedChannelID 为空会错退回会话通道。
+			noteFailedChannelCtx(req.Context(), t.channelID)
 		}
 	}
 	return resp, err
 }
 
-// noteFailedChannel 登记通道的最近一次临时失败（供 DeepAgent 完成时判定实际失败通道）。
+// noteFailedChannelCtx 登记通道失败：优先写入 run 级 collector（按 run 隔离），
+// ctx 无 collector 时退回进程级 map（5s 窗口兜底）。
+func noteFailedChannelCtx(ctx context.Context, channelID string) {
+	if channelID == "" {
+		return
+	}
+	if c := failedChannelCollectorFromContext(ctx); c != nil {
+		c.note(channelID)
+		return
+	}
+	noteFailedChannel(channelID)
+}
+
+// noteFailedChannel 登记通道的最近一次临时失败（进程级兜底路径）。
 func noteFailedChannel(channelID string) {
 	if channelID == "" {
 		return

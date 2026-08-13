@@ -85,7 +85,7 @@ type BatchTaskQueue struct {
 	ProjectID             string       `json:"projectId,omitempty"`
 	AIChannelID           string       `json:"aiChannelId,omitempty"`  // 队列绑定的 AI 通道 ID（空=跟随全局默认）
 	BatchGroupID          string       `json:"batchGroupId,omitempty"` // CSV 派发组 ID（空=非派发创建的队列）
-	Concurrency           int          `json:"concurrency"` // 同时执行的子任务数，默认 1
+	Concurrency           int          `json:"concurrency"`            // 同时执行的子任务数，默认 1
 	Tasks                 []*BatchTask `json:"tasks"`
 	Status                string       `json:"status"` // pending, running, paused, completed, cancelled
 	CreatedAt             time.Time    `json:"createdAt"`
@@ -170,8 +170,13 @@ func (m *BatchTaskManager) SetDB(db *database.DB) {
 	m.db = db
 }
 
-// SetQueueGroup 设置队列所属派发组（同步更新内存与数据库，DB 失败仅告警不阻断派发）。
-func (m *BatchTaskManager) SetQueueGroup(queueID, groupID string) {
+// ErrBatchQueuePersist 标记批量队列持久化失败（区别于参数校验错误）；
+// HTTP 层据此返回 500 而不是 400（审计 P2/P3-7）。
+var ErrBatchQueuePersist = errors.New("batch queue persist")
+
+// SetQueueGroup 设置队列所属派发组（同步更新内存与数据库）。
+// 返回 DB 写入错误，调用方据此决定是否回滚派发（审计 P2/P3-7：不再吞掉持久化失败）。
+func (m *BatchTaskManager) SetQueueGroup(queueID, groupID string) error {
 	m.mu.Lock()
 	if q, ok := m.queues[queueID]; ok {
 		q.BatchGroupID = strings.TrimSpace(groupID)
@@ -179,9 +184,10 @@ func (m *BatchTaskManager) SetQueueGroup(queueID, groupID string) {
 	m.mu.Unlock()
 	if m.db != nil {
 		if err := m.db.UpdateBatchQueueGroup(queueID, groupID); err != nil {
-			m.logger.Warn("queue group persist failed", zap.String("queueId", queueID), zap.Error(err))
+			return fmt.Errorf("queue group 持久化失败: %w", err)
 		}
 	}
+	return nil
 }
 
 // normalizeBatchQueueConcurrency 规范化队列并发数。
@@ -259,7 +265,7 @@ func (m *BatchTaskManager) CreateBatchQueue(
 		})
 	}
 
-	// 保存到数据库
+	// 保存到数据库（DB 失败必须上抛：否则 HTTP 报成功而服务重启后队列消失，审计 P2/P3-7）
 	if m.db != nil {
 		if err := m.db.CreateBatchQueue(
 			queueID,
@@ -274,7 +280,8 @@ func (m *BatchTaskManager) CreateBatchQueue(
 			queue.AIChannelID,
 			dbTasks,
 		); err != nil {
-			m.logger.Warn("batch queue DB create failed", zap.String("queueId", queueID), zap.Error(err))
+			m.logger.Error("batch queue DB create failed", zap.String("queueId", queueID), zap.Error(err))
+			return nil, fmt.Errorf("%w: %v", ErrBatchQueuePersist, err)
 		}
 	}
 

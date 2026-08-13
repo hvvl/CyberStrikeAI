@@ -1814,14 +1814,37 @@ func (h *AgentHandler) CreateBatchQueue(c *gin.Context) {
 		nextRunAt = &next
 	}
 
+	// 校验队列绑定的 AI 通道存在（审计 P2-6：不存在的通道直接 400，
+	// 而不是等到执行时静默换默认模型）。
+	if chErr := h.validateAIChannelExists(req.AIChannelID); chErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": chErr.Error()})
+		return
+	}
+
 	queue, createErr := h.batchTaskManager.CreateBatchQueue(req.Title, req.Role, agentMode, scheduleMode, cronExpr, req.ProjectID, req.AIChannelID, nextRunAt, req.Concurrency, validTasks)
 	if createErr != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": createErr.Error()})
+		if errors.Is(createErr, ErrBatchQueuePersist) {
+			// 持久化失败与参数错误区分：DB 写失败是服务端故障（审计 P2/P3-7）。
+			c.JSON(http.StatusInternalServerError, gin.H{"error": createErr.Error()})
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": createErr.Error()})
+		}
 		return
 	}
 	if session, ok := security.CurrentSession(c); ok && h.db != nil {
-		_ = h.db.SetResourceOwner("batch_task", queue.ID, session.UserID)
-		_ = h.db.AssignResourceToUser(session.UserID, "batch_task", queue.ID)
+		// owner 落库失败不静默：补偿删除队列并返回 500，避免出现「HTTP 成功但重启后 RBAC 信息缺失」。
+		if err := h.db.SetResourceOwner("batch_task", queue.ID, session.UserID); err != nil {
+			h.logger.Error("批量队列 owner 持久化失败，回滚创建", zap.String("queueId", queue.ID), zap.Error(err))
+			_ = h.batchTaskManager.DeleteQueue(queue.ID)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "批量队列 owner 持久化失败: " + err.Error()})
+			return
+		}
+		if err := h.db.AssignResourceToUser(session.UserID, "batch_task", queue.ID); err != nil {
+			h.logger.Error("批量队列用户分配持久化失败，回滚创建", zap.String("queueId", queue.ID), zap.Error(err))
+			_ = h.batchTaskManager.DeleteQueue(queue.ID)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "批量队列用户分配持久化失败: " + err.Error()})
+			return
+		}
 	}
 	started := false
 	if req.ExecuteNow {

@@ -222,7 +222,9 @@ func RunEinoSingleChatModelAgent(
 	}
 
 	retryAttempts, retryBackoffSec := ResolveEinoRunRetryArgs(&ma.EinoMiddleware, &appCfg.OpenAI)
-	result, runErr := runEinoADKAgentLoop(ctx, &einoADKRunLoopArgs{
+	// 请求级失败通道收集器：与 RunDeepAgent 一致，重试耗尽时按本 run 内最近失败通道归属。
+	runCtx, failedCollector := withFailedChannelCollector(ctx)
+	result, runErr := runEinoADKAgentLoop(runCtx, &einoADKRunLoopArgs{
 		OrchMode:                "eino_single",
 		OrchestratorName:        einoSingleAgentName,
 		ConversationID:          conversationID,
@@ -251,7 +253,7 @@ func RunEinoSingleChatModelAgent(
 			"（Eino ADK 单代理会话已完成，但未捕获到助手文本输出。请查看过程详情或日志。）",
 	}, baseMsgs)
 	if runErr != nil && result != nil && errors.Is(runErr, ErrRetryExhausted) {
-		if id := takeRecentFailedChannel(); id != "" {
+		if id := failedCollector.take(); id != "" {
 			result.FailedChannelID = id
 		}
 	}

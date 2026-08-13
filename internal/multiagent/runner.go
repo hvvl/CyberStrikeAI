@@ -617,7 +617,10 @@ func RunDeepAgent(
 	}
 
 	retryAttempts, retryBackoffSec := ResolveEinoRunRetryArgs(&ma.EinoMiddleware, &appCfg.OpenAI)
-	result, runErr := runEinoADKAgentLoop(ctx, &einoADKRunLoopArgs{
+	// 请求级失败通道收集器：transport 层把 429/5xx/网络错误登记进本 run 的 collector，
+	// 重试耗尽时按「本 run 内最近失败通道」归属，并发会话互不串扰（审计 P1-3）。
+	runCtx, failedCollector := withFailedChannelCollector(ctx)
+	result, runErr := runEinoADKAgentLoop(runCtx, &einoADKRunLoopArgs{
 		OrchMode:                orchMode,
 		OrchestratorName:        orchestratorName,
 		ConversationID:          conversationID,
@@ -646,9 +649,9 @@ func RunDeepAgent(
 			"（Eino 多代理编排已完成，但未捕获到助手文本输出。请查看过程详情或日志。）",
 	}, baseMsgs)
 	if runErr != nil && result != nil && errors.Is(runErr, ErrRetryExhausted) {
-		// 重试耗尽：由 transport 层 429/5xx 响应登记判定实际失败的角色通道，
-		// 使 handler 的 failover 能按角色通道的 fallback_channel 定向切换。
-		if id := takeRecentFailedChannel(); id != "" {
+		// 重试耗尽：由 run 级 collector 判定实际失败的角色通道（429/5xx/网络错误
+		// 均会登记），使 handler 的 failover 能按角色通道的 fallback_channel 定向切换。
+		if id := failedCollector.take(); id != "" {
 			result.FailedChannelID = id
 		}
 	}

@@ -185,6 +185,7 @@ func (db *DB) initTables() error {
 		updated_at DATETIME NOT NULL,
 		role_name TEXT NOT NULL DEFAULT '默认',
 		agent_mode TEXT NOT NULL DEFAULT 'eino_single',
+		ai_channel_id TEXT,
 		last_react_input TEXT,
 		last_react_output TEXT
 	);`
@@ -1195,6 +1196,21 @@ func (db *DB) migrateConversationsTable() error {
 	} else if count == 0 {
 		if _, err := db.Exec("ALTER TABLE conversations ADD COLUMN agent_mode TEXT NOT NULL DEFAULT 'eino_single'"); err != nil {
 			db.logger.Warn("添加agent_mode字段失败", zap.Error(err))
+		}
+	}
+
+	// 检查 ai_channel_id 字段是否存在（会话绑定的 AI 通道：续跑失败会话时按原通道续跑，审计 P2-5）
+	err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name='ai_channel_id'").Scan(&count)
+	if err != nil {
+		if _, addErr := db.Exec("ALTER TABLE conversations ADD COLUMN ai_channel_id TEXT"); addErr != nil {
+			errMsg := strings.ToLower(addErr.Error())
+			if !strings.Contains(errMsg, "duplicate column") && !strings.Contains(errMsg, "already exists") {
+				db.logger.Warn("添加ai_channel_id字段失败", zap.Error(addErr))
+			}
+		}
+	} else if count == 0 {
+		if _, err := db.Exec("ALTER TABLE conversations ADD COLUMN ai_channel_id TEXT"); err != nil {
+			db.logger.Warn("添加ai_channel_id字段失败", zap.Error(err))
 		}
 	}
 

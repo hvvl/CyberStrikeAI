@@ -235,6 +235,10 @@ func RegisterBatchTaskMCPTools(mcpServer *mcp.Server, h *AgentHandler, logger *z
 		}
 		concurrency := int(mcpArgFloat(args, "concurrency"))
 		aiChannelID := strings.TrimSpace(mcpArgString(args, "ai_channel_id"))
+		// 通道存在性校验（审计 P2-6：与 HTTP 创建入口一致）。
+		if chErr := h.validateAIChannelExists(aiChannelID); chErr != nil {
+			return batchMCPTextResult("创建队列失败: "+chErr.Error(), true), nil
+		}
 		queue, createErr := h.batchTaskManager.CreateBatchQueue(title, role, agentMode, scheduleMode, cronExpr, projectID, aiChannelID, nextRunAt, concurrency, tasks)
 		if createErr != nil {
 			return batchMCPTextResult("创建队列失败: "+createErr.Error(), true), nil

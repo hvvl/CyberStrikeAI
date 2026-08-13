@@ -245,28 +245,42 @@ func (h *AgentHandler) executeOneBatchSubTask(queueID string, queue *BatchTaskQu
 	}
 
 	// 按队列绑定的 AI 通道解析配置（空=跟随全局默认通道）。
+	// 通道不存在/已删除 → 显式失败任务，绝不静默改默认模型（审计 P2-6）；
+	// 正常的通道替换只允许由该通道自己的 fallback_channel 触发。
 	runCfg := h.config
 	if chID := strings.TrimSpace(queue.AIChannelID); chID != "" {
-		if cfg, _, err := h.configForAIChannel(chID); err == nil && cfg != nil {
-			runCfg = cfg
-		} else if h.logger != nil {
-			h.logger.Warn("batch queue AI 通道解析失败，回退默认通道",
-				zap.String("queueId", queue.ID), zap.String("aiChannelId", chID), zap.Error(err))
+		if verr := h.validateAIChannelExists(chID); verr != nil {
+			if h.logger != nil {
+				h.logger.Warn("batch queue AI 通道不可用，任务失败",
+					zap.String("queueId", queue.ID), zap.String("aiChannelId", chID), zap.Error(verr))
+			}
+			h.handleBatchSubTaskRunError(queueID, task, conversationID, assistantMessageID, baseCtx, taskCtx, nil, fmt.Errorf("队列绑定的 AI 通道不可用: %w", verr), &finishStatus)
+			return
 		}
+		cfg, _, err := h.configForAIChannel(chID)
+		if err != nil || cfg == nil {
+			if h.logger != nil {
+				h.logger.Warn("batch queue AI 通道解析失败，任务失败",
+					zap.String("queueId", queue.ID), zap.String("aiChannelId", chID), zap.Error(err))
+			}
+			h.handleBatchSubTaskRunError(queueID, task, conversationID, assistantMessageID, baseCtx, taskCtx, nil, fmt.Errorf("队列绑定的 AI 通道解析失败: %v", err), &finishStatus)
+			return
+		}
+		runCfg = cfg
 	}
 
-	var resultMA *multiagent.RunResult
-	var runErr error
-	switch {
-	case useBatchMulti:
-		resultMA, runErr = multiagent.RunDeepAgent(taskCtx, runCfg, &runCfg.MultiAgent, h.agent, h.db, h.logger, conversationID, h.conversationProjectID(conversationID), finalMessage, []agent.ChatMessage{}, roleTools, progressCallback, h.agentsMarkdownDir, batchOrch, nil, h.agentSessionContextBlock(conversationID))
-	default:
-		if runCfg == nil {
-			runErr = fmt.Errorf("服务器配置未加载")
-		} else {
-			resultMA, runErr = multiagent.RunEinoSingleChatModelAgent(taskCtx, runCfg, &runCfg.MultiAgent, h.agent, h.db, h.logger, conversationID, h.conversationProjectID(conversationID), finalMessage, []agent.ChatMessage{}, roleTools, progressCallback, nil, h.agentSessionContextBlock(conversationID))
+	// 与普通聊天一致的 failover 状态机：重试耗尽 → 按失败通道定向切换 fallback →
+	// 分段续跑（审计 P1-4：批量路径此前完全绕过跨通道 failover）。
+	curHistory := []agent.ChatMessage{}
+	resultMA, runErr := h.runAgentWithChannelFailover(runCfg, conversationID, &curHistory, progressCallback, baseCtx, func(segCfg *config.Config) (*multiagent.RunResult, error) {
+		if useBatchMulti {
+			return multiagent.RunDeepAgent(taskCtx, segCfg, &segCfg.MultiAgent, h.agent, h.db, h.logger, conversationID, h.conversationProjectID(conversationID), finalMessage, curHistory, roleTools, progressCallback, h.agentsMarkdownDir, batchOrch, nil, h.agentSessionContextBlock(conversationID))
 		}
-	}
+		if segCfg == nil {
+			return nil, fmt.Errorf("服务器配置未加载")
+		}
+		return multiagent.RunEinoSingleChatModelAgent(taskCtx, segCfg, &segCfg.MultiAgent, h.agent, h.db, h.logger, conversationID, h.conversationProjectID(conversationID), finalMessage, curHistory, roleTools, progressCallback, nil, h.agentSessionContextBlock(conversationID))
+	})
 
 	if runErr != nil {
 		h.handleBatchSubTaskRunError(queueID, task, conversationID, assistantMessageID, baseCtx, taskCtx, resultMA, runErr, &finishStatus)
