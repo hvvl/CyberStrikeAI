@@ -54,9 +54,6 @@ type EnsureLocalConfigResult struct {
 
 const (
 	DefaultMaxCompletionTokens                        = 16384
-	DefaultMaxToolArgumentsBytes                      = 65536
-	DefaultMaxShellCommandBytes                       = 65536
-	DefaultModelOutputRepairMaxAttempts               = 1
 	DefaultSummarizationUserIntentLedgerMaxRunes      = 96000
 	DefaultSummarizationUserIntentLedgerEntryMaxRunes = 16000
 	DefaultLatestUserMessageMaxRunes                  = 48000
@@ -256,12 +253,6 @@ func (c MultiAgentEinoCallbacksConfig) EinoCallbacksMaxOutputSummaryRunes() int 
 
 // MultiAgentEinoMiddlewareConfig optional Eino ADK middleware and Deep / supervisor tuning.
 type MultiAgentEinoMiddlewareConfig struct {
-	// MaxToolArgumentsBytes hard-rejects oversized model-generated tool arguments before execution.
-	MaxToolArgumentsBytes int `yaml:"max_tool_arguments_bytes,omitempty" json:"max_tool_arguments_bytes,omitempty"`
-	// MaxShellCommandBytes applies a stricter limit to exec/execute command strings.
-	MaxShellCommandBytes int `yaml:"max_shell_command_bytes,omitempty" json:"max_shell_command_bytes,omitempty"`
-	// ModelOutputRepairMaxAttempts limits consecutive model-output repair attempts.
-	ModelOutputRepairMaxAttempts int `yaml:"model_output_repair_max_attempts,omitempty" json:"model_output_repair_max_attempts,omitempty"`
 	// PatchToolCalls inserts placeholder tool results for dangling assistant tool_calls (nil = enabled).
 	PatchToolCalls *bool `yaml:"patch_tool_calls,omitempty" json:"patch_tool_calls,omitempty"`
 	// ToolSearch enables dynamictool/toolsearch: hide tail tools until model calls tool_search (reduces prompt tools).
@@ -297,7 +288,7 @@ type MultiAgentEinoMiddlewareConfig struct {
 	LatestUserMessageHeadRunes int `yaml:"latest_user_message_head_runes,omitempty" json:"latest_user_message_head_runes,omitempty"`
 	// LatestUserMessageTailRunes keeps the tail preview for an oversized current user turn.
 	LatestUserMessageTailRunes int `yaml:"latest_user_message_tail_runes,omitempty" json:"latest_user_message_tail_runes,omitempty"`
-	// SummarizationRetryMaxAttempts 已废弃：summarization 与 run loop 共用 run_retry_max_attempts 及 isEinoTransientRunError。
+	// SummarizationRetryMaxAttempts 已废弃：summarization 与 Eino 原生 ModelRetry 共用 model_retry_max_retries 及 isEinoTransientRunError。
 	SummarizationRetryMaxAttempts int `yaml:"summarization_retry_max_attempts,omitempty" json:"summarization_retry_max_attempts,omitempty"`
 	// PlanExecuteUserInputBudgetRatio caps planner/replanner/executor userInput prompt budget ratio (default 0.35).
 	PlanExecuteUserInputBudgetRatio float64 `yaml:"plan_execute_user_input_budget_ratio,omitempty" json:"plan_execute_user_input_budget_ratio,omitempty"`
@@ -311,37 +302,25 @@ type MultiAgentEinoMiddlewareConfig struct {
 	CheckpointDir string `yaml:"checkpoint_dir,omitempty" json:"checkpoint_dir,omitempty"`
 	// DeepOutputKey passed to deep.Config OutputKey (session final text); empty = off.
 	DeepOutputKey string `yaml:"deep_output_key,omitempty" json:"deep_output_key,omitempty"`
-	// DeepModelRetryMaxRetries 已废弃：临时错误统一由 run loop 内 isEinoTransientRunError + run_retry_max_attempts 处理。
+	// DeepModelRetryMaxRetries 已废弃：请用 model_retry_max_retries；保留字段仅为兼容旧配置。
 	DeepModelRetryMaxRetries int `yaml:"deep_model_retry_max_retries,omitempty" json:"deep_model_retry_max_retries,omitempty"`
-	// RunRetryMaxAttempts > 0：408/409/425/429/5xx/网络抖动时可退避重试次数（run loop 与 summarization 共用）；0=默认 6。
+	// ModelRetryMaxRetries configures Eino ADK native ChatModel retry attempts; 0=follows RunRetryMaxAttempts resolution (default 6).
+	ModelRetryMaxRetries int `yaml:"model_retry_max_retries,omitempty" json:"model_retry_max_retries,omitempty"`
+	// ModelRetryMaxBackoffSec caps native model retry backoff seconds; 0=default 30.
+	ModelRetryMaxBackoffSec int `yaml:"model_retry_max_backoff_sec,omitempty" json:"model_retry_max_backoff_sec,omitempty"`
+	// ModelFailoverChannels lists ai.channels IDs to try after native model retry is exhausted.
+	ModelFailoverChannels []string `yaml:"model_failover_channels,omitempty" json:"model_failover_channels,omitempty"`
+	// ModelFailoverMaxRetries caps distinct failover channel attempts; 0=all configured failover channels.
+	ModelFailoverMaxRetries int `yaml:"model_failover_max_retries,omitempty" json:"model_failover_max_retries,omitempty"`
+	// RunRetryMaxAttempts：run loop 层退避续跑次数（通道级 run_retry_max_attempts 可覆盖；0=默认 6）。
+	// 模型临时错误优先由 Eino 原生 ModelRetry（model_retry_max_retries）处理，本字段为 handler 兜底。
 	RunRetryMaxAttempts int `yaml:"run_retry_max_attempts,omitempty" json:"run_retry_max_attempts,omitempty"`
-	// RunRetryMaxBackoffSec 单次退避上限秒数；0=默认 30。
+	// RunRetryMaxBackoffSec 已废弃：请用 model_retry_max_backoff_sec；仅保留给非模型层 run loop 兜底与 summarization 旧字段。
 	RunRetryMaxBackoffSec int `yaml:"run_retry_max_backoff_sec,omitempty" json:"run_retry_max_backoff_sec,omitempty"`
 	// EmptyResponseContinueMaxAttempts Run 成功但未捕获助手正文时 Handler 层退避续跑次数；0=默认 5。
 	EmptyResponseContinueMaxAttempts int `yaml:"empty_response_continue_max_attempts,omitempty" json:"empty_response_continue_max_attempts,omitempty"`
 	// TaskToolDescriptionPrefix when non-empty sets deep.Config TaskToolDescriptionGenerator (sub-agent names appended).
 	TaskToolDescriptionPrefix string `yaml:"task_tool_description_prefix,omitempty" json:"task_tool_description_prefix,omitempty"`
-}
-
-func (c MultiAgentEinoMiddlewareConfig) MaxToolArgumentsBytesEffective() int {
-	if c.MaxToolArgumentsBytes > 0 {
-		return c.MaxToolArgumentsBytes
-	}
-	return DefaultMaxToolArgumentsBytes
-}
-
-func (c MultiAgentEinoMiddlewareConfig) MaxShellCommandBytesEffective() int {
-	if c.MaxShellCommandBytes > 0 {
-		return c.MaxShellCommandBytes
-	}
-	return DefaultMaxShellCommandBytes
-}
-
-func (c MultiAgentEinoMiddlewareConfig) ModelOutputRepairMaxAttemptsEffective() int {
-	if c.ModelOutputRepairMaxAttempts > 0 {
-		return c.ModelOutputRepairMaxAttempts
-	}
-	return DefaultModelOutputRepairMaxAttempts
 }
 
 func (c MultiAgentEinoMiddlewareConfig) SummarizationTriggerRatioEffective() float64 {
@@ -517,6 +496,10 @@ type MultiAgentPublic struct {
 	LatestUserMessageMaxRunes                  int      `json:"latest_user_message_max_runes"`
 	LatestUserMessageHeadRunes                 int      `json:"latest_user_message_head_runes"`
 	LatestUserMessageTailRunes                 int      `json:"latest_user_message_tail_runes"`
+	ModelRetryMaxRetries                       int      `json:"model_retry_max_retries"`
+	ModelRetryMaxBackoffSec                    int      `json:"model_retry_max_backoff_sec"`
+	ModelFailoverChannels                      []string `json:"model_failover_channels,omitempty"`
+	ModelFailoverMaxRetries                    int      `json:"model_failover_max_retries"`
 	ToolSearchAlwaysVisibleTools               []string `json:"tool_search_always_visible_tools,omitempty"`
 	ToolSearchAlwaysVisibleEffectiveTools      []string `json:"tool_search_always_visible_effective_tools,omitempty"`
 }
@@ -558,15 +541,19 @@ func NormalizeMultiAgentOrchestration(s string) string {
 
 // MultiAgentAPIUpdate 设置页/API 仅更新多代理标量字段；写入 YAML 时不覆盖 sub_agents 等块。
 type MultiAgentAPIUpdate struct {
-	Enabled                                    bool   `json:"enabled"`
-	RobotDefaultAgentMode                      string `json:"robot_default_agent_mode,omitempty"`
-	BatchUseMultiAgent                         bool   `json:"batch_use_multi_agent"`
-	PlanExecuteLoopMaxIterations               *int   `json:"plan_execute_loop_max_iterations,omitempty"`
-	SummarizationUserIntentLedgerMaxRunes      *int   `json:"summarization_user_intent_ledger_max_runes,omitempty"`
-	SummarizationUserIntentLedgerEntryMaxRunes *int   `json:"summarization_user_intent_ledger_entry_max_runes,omitempty"`
-	LatestUserMessageMaxRunes                  *int   `json:"latest_user_message_max_runes,omitempty"`
-	LatestUserMessageHeadRunes                 *int   `json:"latest_user_message_head_runes,omitempty"`
-	LatestUserMessageTailRunes                 *int   `json:"latest_user_message_tail_runes,omitempty"`
+	Enabled                                    bool      `json:"enabled"`
+	RobotDefaultAgentMode                      string    `json:"robot_default_agent_mode,omitempty"`
+	BatchUseMultiAgent                         bool      `json:"batch_use_multi_agent"`
+	PlanExecuteLoopMaxIterations               *int      `json:"plan_execute_loop_max_iterations,omitempty"`
+	SummarizationUserIntentLedgerMaxRunes      *int      `json:"summarization_user_intent_ledger_max_runes,omitempty"`
+	SummarizationUserIntentLedgerEntryMaxRunes *int      `json:"summarization_user_intent_ledger_entry_max_runes,omitempty"`
+	LatestUserMessageMaxRunes                  *int      `json:"latest_user_message_max_runes,omitempty"`
+	LatestUserMessageHeadRunes                 *int      `json:"latest_user_message_head_runes,omitempty"`
+	LatestUserMessageTailRunes                 *int      `json:"latest_user_message_tail_runes,omitempty"`
+	ModelRetryMaxRetries                       *int      `json:"model_retry_max_retries,omitempty"`
+	ModelRetryMaxBackoffSec                    *int      `json:"model_retry_max_backoff_sec,omitempty"`
+	ModelFailoverChannels                      *[]string `json:"model_failover_channels,omitempty"`
+	ModelFailoverMaxRetries                    *int      `json:"model_failover_max_retries,omitempty"`
 	// 指针区分「JSON 未传该字段」与「传空数组要清空」；省略时不应覆盖 YAML 中的常驻工具白名单。
 	ToolSearchAlwaysVisibleTools *[]string `json:"tool_search_always_visible_tools,omitempty"`
 }
@@ -834,7 +821,7 @@ type MCPConfig struct {
 }
 
 type OpenAIConfig struct {
-	Provider            string `yaml:"provider,omitempty" json:"provider,omitempty"` // API 提供商: "openai"(默认) 或 "claude"，claude 时自动桥接为 Anthropic Messages API
+	Provider            string `yaml:"provider,omitempty" json:"provider,omitempty"` // API 提供商: "openai"(默认) 或 "claude"，claude 使用 Eino 原生 Anthropic Messages API
 	APIKey              string `yaml:"api_key" json:"api_key"`
 	BaseURL             string `yaml:"base_url" json:"base_url"`
 	Model               string `yaml:"model" json:"model"`
@@ -849,7 +836,9 @@ type OpenAIConfig struct {
 	RunRetryMaxBackoffSec int `yaml:"run_retry_max_backoff_sec,omitempty" json:"run_retry_max_backoff_sec,omitempty"`
 	// FallbackChannel 本通道重试耗尽后自动切换的备用通道 ID（ai.channels 中的键）；空 = 不做跨通道降级。
 	FallbackChannel string `yaml:"fallback_channel,omitempty" json:"fallback_channel,omitempty"`
-	// Reasoning 控制 Eino ChatModel 的 thinking / reasoning_effort / output_config 等（Eino 单/多代理路径生效）。
+	// ChannelID 运行时字段：本配置实际对应的 ai.channels 通道 ID（ResolveChannel/ToOpenAIConfig 时写回）。
+	// 不来自 YAML；用于通道并发限流、Retry-After cooldown 与失败通道归属判定。
+	ChannelID string                `yaml:"-" json:"-"`
 	Reasoning OpenAIReasoningConfig `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
 }
 
@@ -879,9 +868,10 @@ type AIChannelConfig struct {
 	// 不同套餐限流特性不同（token plan 与 agent plan），可为每个通道单独调节重试强度。
 	RunRetryMaxAttempts   int `yaml:"run_retry_max_attempts,omitempty" json:"run_retry_max_attempts,omitempty"`
 	RunRetryMaxBackoffSec int `yaml:"run_retry_max_backoff_sec,omitempty" json:"run_retry_max_backoff_sec,omitempty"`
-	// FallbackChannel 本通道重试耗尽后自动切换的备用通道 ID；空 = 不做跨通道降级。
-	FallbackChannel string                `yaml:"fallback_channel,omitempty" json:"fallback_channel,omitempty"`
-	Reasoning       OpenAIReasoningConfig `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
+	// FallbackChannel 本通道重试耗尽后自动切换的备用通道 ID（ai.channels 中的键）；空 = 不做跨通道降级。
+	FallbackChannel string `yaml:"fallback_channel,omitempty" json:"fallback_channel,omitempty"`
+	// Reasoning 控制 Eino ChatModel 的 thinking / reasoning_effort / output_config 等（Eino 单/多代理路径生效）。
+	Reasoning OpenAIReasoningConfig `yaml:"reasoning,omitempty" json:"reasoning,omitempty"`
 }
 
 func (c AIChannelConfig) ToOpenAIConfig() OpenAIConfig {
@@ -900,6 +890,7 @@ func (c AIChannelConfig) ToOpenAIConfig() OpenAIConfig {
 		RunRetryMaxAttempts:   c.RunRetryMaxAttempts,
 		RunRetryMaxBackoffSec: c.RunRetryMaxBackoffSec,
 		FallbackChannel:       c.FallbackChannel,
+		ChannelID:             "", // map key 即通道 ID，由 ResolveChannel 写回（见下）
 		Reasoning:             c.Reasoning,
 	}
 }
@@ -972,7 +963,11 @@ func (c AIConfig) ResolveChannel(channelID string) (OpenAIConfig, string, bool) 
 	}
 	if c.Channels != nil {
 		if ch, ok := c.Channels[id]; ok {
-			return ch.ToOpenAIConfig(), id, true
+			oa := ch.ToOpenAIConfig()
+			if oa.ChannelID == "" {
+				oa.ChannelID = id
+			}
+			return oa, id, true
 		}
 	}
 	return OpenAIConfig{}, id, false
@@ -1003,6 +998,16 @@ func (c OpenAIConfig) MaxCompletionTokensEffective() int {
 		return c.MaxCompletionTokens
 	}
 	return DefaultMaxCompletionTokens
+}
+
+// IsDeepSeekEndpointOrModel reports whether the channel targets DeepSeek's
+// official-compatible API or a DeepSeek model family. This is separate from the
+// reasoning profile: profile controls field mapping, while DeepSeek has provider
+// constraints such as default thinking mode and no tool_choice in thinking mode.
+func (c OpenAIConfig) IsDeepSeekEndpointOrModel() bool {
+	baseURL := strings.ToLower(strings.TrimSpace(c.BaseURL))
+	model := strings.ToLower(strings.TrimSpace(c.Model))
+	return strings.Contains(baseURL, "deepseek") || strings.Contains(model, "deepseek")
 }
 
 // OpenAIReasoningConfig 全局默认与网关 profile（对话页可通过 ChatRequest.reasoning 覆盖，受 AllowClientReasoning 约束）。
@@ -1410,7 +1415,7 @@ func Load(path string) (*Config, error) {
 		cfg.Audit.MaxDetailBytes = 8192
 	}
 	cfg.ApplyDefaultAIChannel()
-	if err := validateModelOutputLimits(cfg.OpenAI, cfg.MultiAgent.EinoMiddleware); err != nil {
+	if err := validateOpenAIOutputLimits(cfg.OpenAI); err != nil {
 		return nil, err
 	}
 	// 如果配置了工具目录，从目录加载工具配置
@@ -1475,21 +1480,9 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func validateModelOutputLimits(openAI OpenAIConfig, mw MultiAgentEinoMiddlewareConfig) error {
+func validateOpenAIOutputLimits(openAI OpenAIConfig) error {
 	if openAI.MaxCompletionTokens < 0 {
 		return fmt.Errorf("openai.max_completion_tokens 必须为正数")
-	}
-	if mw.MaxToolArgumentsBytes < 0 {
-		return fmt.Errorf("multi_agent.eino_middleware.max_tool_arguments_bytes 必须为正数")
-	}
-	if mw.MaxShellCommandBytes < 0 {
-		return fmt.Errorf("multi_agent.eino_middleware.max_shell_command_bytes 必须为正数")
-	}
-	if mw.ModelOutputRepairMaxAttempts < 0 {
-		return fmt.Errorf("multi_agent.eino_middleware.model_output_repair_max_attempts 必须为正数")
-	}
-	if mw.MaxShellCommandBytesEffective() > mw.MaxToolArgumentsBytesEffective() {
-		return fmt.Errorf("multi_agent.eino_middleware.max_shell_command_bytes 不能大于 max_tool_arguments_bytes")
 	}
 	return nil
 }

@@ -2,9 +2,11 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"cyberstrike-ai/internal/audit"
 	"cyberstrike-ai/internal/database"
@@ -18,12 +20,20 @@ type ConversationTaskStopper interface {
 	CancelRunningTaskForConversation(conversationID string)
 }
 
+// ConversationTaskStateProvider reports whether the in-memory agent task for
+// a conversation is still genuinely running. Plan files may survive a service
+// restart or cancellation, so their status alone is not authoritative.
+type ConversationTaskStateProvider interface {
+	ConversationTaskRuntimeState(conversationID string) (running bool, startedAt time.Time)
+}
+
 // ConversationHandler 对话处理器
 type ConversationHandler struct {
 	db          *database.DB
 	logger      *zap.Logger
 	audit       *audit.Service
 	taskStopper ConversationTaskStopper
+	taskState   ConversationTaskStateProvider
 }
 
 // SetAudit wires platform audit logging.
@@ -34,6 +44,12 @@ func (h *ConversationHandler) SetAudit(s *audit.Service) {
 // SetTaskStopper wires cancellation of in-flight agent tasks on conversation delete.
 func (h *ConversationHandler) SetTaskStopper(stopper ConversationTaskStopper) {
 	h.taskStopper = stopper
+}
+
+// SetTaskStateProvider wires the live agent task registry used by supplemental
+// conversation UI such as the agent-maintained plan list.
+func (h *ConversationHandler) SetTaskStateProvider(provider ConversationTaskStateProvider) {
+	h.taskState = provider
 }
 
 // NewConversationHandler 创建新的对话处理器
@@ -206,6 +222,70 @@ func (h *ConversationHandler) GetConversation(c *gin.Context) {
 	c.JSON(http.StatusOK, conv)
 }
 
+// GetConversationPlanTasks returns the task list maintained by the agent's
+// TaskCreate/TaskUpdate tools for this conversation.
+func (h *ConversationHandler) GetConversationPlanTasks(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	session, ok := security.CurrentSession(c)
+	if !ok || !h.db.UserCanAccessResource(session.UserID, session.Scope, "conversation", id) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该对话"})
+		return
+	}
+	if _, err := h.db.GetConversationLite(id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
+		return
+	}
+	running := false
+	startedAt := time.Time{}
+	if h.taskState != nil {
+		running, startedAt = h.taskState.ConversationTaskRuntimeState(id)
+	}
+	if !running {
+		c.JSON(http.StatusOK, gin.H{
+			"tasks": []database.ConversationPlanTask{}, "total": 0,
+			"completed": 0, "activeStep": 0, "running": false,
+		})
+		return
+	}
+	tasks, err := h.db.ListConversationPlanTasksSince(id, startedAt)
+	if err != nil {
+		h.logger.Error("获取对话任务列表失败", zap.String("conversationId", id), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取任务列表失败"})
+		return
+	}
+
+	completed := 0
+	activeStep := 0
+	for i, task := range tasks {
+		status := strings.ToLower(strings.TrimSpace(task.Status))
+		if status == "completed" {
+			completed++
+		}
+		if activeStep == 0 && status == "in_progress" {
+			activeStep = i + 1
+		}
+	}
+	if activeStep == 0 {
+		for i, task := range tasks {
+			if strings.ToLower(strings.TrimSpace(task.Status)) != "completed" {
+				activeStep = i + 1
+				break
+			}
+		}
+	}
+	if activeStep == 0 && len(tasks) > 0 {
+		activeStep = len(tasks)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"tasks":      tasks,
+		"total":      len(tasks),
+		"completed":  completed,
+		"activeStep": activeStep,
+		"running":    true,
+	})
+}
+
 const (
 	defaultProcessDetailsPageLimit = 50
 	maxProcessDetailsPageLimit     = 500
@@ -246,7 +326,7 @@ func (h *ConversationHandler) GetMessageProcessDetails(c *gin.Context) {
 		}
 
 		details = database.DedupeConsecutiveProcessDetails(details)
-		out := processDetailsToJSON(h.logger, details, true)
+		out := processDetailsToJSON(h.logger, h.db, details, true)
 		c.JSON(http.StatusOK, gin.H{
 			"processDetails": out,
 			"total":          len(out),
@@ -295,7 +375,7 @@ func (h *ConversationHandler) GetMessageProcessDetails(c *gin.Context) {
 		return
 	}
 	details = database.DedupeConsecutiveProcessDetails(details)
-	out := processDetailsToJSON(h.logger, details, false)
+	out := processDetailsToJSON(h.logger, h.db, details, false)
 	// A page may end between tool_call and tool_result. Return the full-history
 	// execution summary so the UI can render terminal status without pretending
 	// that an unloaded result is still running.
@@ -330,7 +410,7 @@ func (h *ConversationHandler) GetProcessDetail(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "过程详情不存在"})
 		return
 	}
-	out := processDetailsToJSON(h.logger, []database.ProcessDetail{*detail}, true)
+	out := processDetailsToJSON(h.logger, h.db, []database.ProcessDetail{*detail}, true)
 	if len(out) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "过程详情不存在"})
 		return
@@ -338,7 +418,7 @@ func (h *ConversationHandler) GetProcessDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"processDetail": out[0]})
 }
 
-func processDetailsToJSON(logger *zap.Logger, details []database.ProcessDetail, includeToolPayload bool) []map[string]interface{} {
+func processDetailsToJSON(logger *zap.Logger, db *database.DB, details []database.ProcessDetail, includeToolPayload bool) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(details))
 	for _, d := range details {
 		var data interface{}
@@ -346,6 +426,9 @@ func processDetailsToJSON(logger *zap.Logger, details []database.ProcessDetail, 
 			if err := json.Unmarshal([]byte(d.Data), &data); err != nil {
 				logger.Warn("解析过程详情数据失败", zap.Error(err))
 			}
+		}
+		if m, ok := data.(map[string]interface{}); ok {
+			enrichEmptyToolCallArgumentsFromExecution(logger, db, d, m)
 		}
 		if !includeToolPayload {
 			data = summarizeProcessDetailData(d.EventType, data)
@@ -363,6 +446,50 @@ func processDetailsToJSON(logger *zap.Logger, details []database.ProcessDetail, 
 	return out
 }
 
+func enrichEmptyToolCallArgumentsFromExecution(logger *zap.Logger, db *database.DB, detail database.ProcessDetail, data map[string]interface{}) {
+	if db == nil || detail.EventType != "tool_call" || !toolCallArgumentsEmpty(data) {
+		return
+	}
+	toolName := strings.TrimSpace(fmt.Sprint(data["toolName"]))
+	if toolName == "" || detail.ConversationID == "" || detail.CreatedAt.IsZero() {
+		return
+	}
+	execID, args, err := db.FindNearestToolExecutionArguments(detail.ConversationID, toolName, detail.CreatedAt, 5*time.Second)
+	if err != nil {
+		if logger != nil {
+			logger.Debug("未能从工具执行记录补全过程详情参数",
+				zap.Error(err),
+				zap.String("processDetailId", detail.ID),
+				zap.String("toolName", toolName))
+		}
+		return
+	}
+	if len(args) == 0 {
+		return
+	}
+	data["argumentsObj"] = args
+	if b, err := json.Marshal(args); err == nil {
+		data["arguments"] = string(b)
+	}
+	if strings.TrimSpace(execID) != "" {
+		data["executionId"] = strings.TrimSpace(execID)
+	}
+}
+
+func toolCallArgumentsEmpty(data map[string]interface{}) bool {
+	if data == nil {
+		return true
+	}
+	if args, ok := data["argumentsObj"].(map[string]interface{}); ok && len(args) > 0 {
+		return false
+	}
+	if raw, ok := data["arguments"]; ok {
+		s := strings.TrimSpace(fmt.Sprint(raw))
+		return s == "" || s == "{}" || s == "null"
+	}
+	return true
+}
+
 func summarizeProcessDetailData(eventType string, data interface{}) interface{} {
 	m, ok := data.(map[string]interface{})
 	if !ok || (eventType != "tool_call" && eventType != "tool_result") {
@@ -370,10 +497,11 @@ func summarizeProcessDetailData(eventType string, data interface{}) interface{} 
 	}
 	allow := map[string]bool{
 		"toolName": true, "toolCallId": true, "index": true, "total": true,
+		"arguments": true, "argumentsObj": true,
 		"success": true, "isError": true, "executionId": true,
 		"einoAgent": true, "einoRole": true, "einoScope": true, "orchestration": true,
 		"agentFacing": true,
-		"status": true, "modelFacingIsError": true, "resultPreview": true,
+		"status":      true, "modelFacingIsError": true, "resultPreview": true,
 	}
 	out := make(map[string]interface{}, len(allow)+1)
 	for k, v := range m {

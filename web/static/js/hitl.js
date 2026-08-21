@@ -98,7 +98,9 @@ function hitlT(key, fallback, params) {
 
 const HITL_LOGS_PAGE_SIZE_KEY = 'cyberstrike_hitl_logs_page_size';
 const HITL_PENDING_PAGE_SIZE_KEY = 'cyberstrike_hitl_pending_page_size';
+const HITL_TIMEOUT_DEFAULT_MIGRATION_PREFIX = 'cyberstrike-hitl-timeout-default-v1:';
 const HITL_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const hitlConversationConfigSaveQueues = new Map();
 
 function hitlPaginationT(key, opts, fallback) {
     if (typeof window.t === 'function') {
@@ -212,6 +214,21 @@ function normalizeHitlTimeoutSeconds(v, fallback) {
     return 0;
 }
 
+function shouldMigrateLegacyHitlTimeout(conversationId, timeoutSeconds) {
+    if (!conversationId || normalizeHitlTimeoutSeconds(timeoutSeconds, 0) > 0) return false;
+    try {
+        return localStorage.getItem(HITL_TIMEOUT_DEFAULT_MIGRATION_PREFIX + conversationId) !== '1';
+    } catch (e) {
+        return false;
+    }
+}
+
+function markLegacyHitlTimeoutMigrated(conversationId) {
+    try {
+        localStorage.setItem(HITL_TIMEOUT_DEFAULT_MIGRATION_PREFIX + conversationId, '1');
+    } catch (e) { /* ignore */ }
+}
+
 function getCurrentConversationIdForHitl() {
     if (typeof window.currentConversationId === 'string' && window.currentConversationId) {
         return window.currentConversationId;
@@ -240,16 +257,6 @@ function applyHitlDefaultReviewerFromServer(reviewer) {
     const v = hitlReviewerNormalize(reviewer);
     if (typeof window !== 'undefined') {
         window.csaiHitlDefaultReviewer = v;
-    }
-    if (typeof window.saveHitlLastGlobalConfig === 'function' && typeof window.getHitlLastGlobalConfig === 'function') {
-        const gl = window.getHitlLastGlobalConfig();
-        const base = gl && typeof gl === 'object'
-            ? gl
-            : { mode: 'off', sensitiveTools: '', updatedAt: '' };
-        window.saveHitlLastGlobalConfig(Object.assign({}, base, {
-            reviewer: v,
-            updatedAt: new Date().toISOString()
-        }));
     }
     return v;
 }
@@ -352,9 +359,9 @@ function showHitlPageWhitelistFeedback(text, isError) {
     el.className = 'hitl-apply-feedback' + (isError ? ' hitl-apply-feedback--error' : '');
 }
 
-function syncHitlSidebarWhitelistDisplay(toolsStr) {
-    const sidebarEl = document.getElementById('hitl-sensitive-tools');
-    if (sidebarEl) sidebarEl.value = toolsStr;
+function syncHitlSidebarWhitelistDisplay(_toolsStr) {
+    // The chat field is conversation-scoped. Updating the global allowlist page
+    // must not replace it with a merged global + conversation display value.
 }
 
 async function fetchHitlGlobalToolWhitelist() {
@@ -489,29 +496,39 @@ async function saveHitlPageWhitelist() {
 
 async function saveHitlConversationConfig(conversationId, config) {
     if (!conversationId || !config) return false;
+    const normalizedConversationId = String(conversationId).trim();
     const mode = hitlModeNormalize(config.mode || 'off');
     const enabled = typeof config.enabled === 'boolean' ? config.enabled : (mode !== 'off');
     const sensitiveTools = hitlSensitiveToolsToArray(config);
     const timeoutSeconds = normalizeHitlTimeoutSeconds(config.timeoutSeconds, 0);
     const reviewer = hitlReviewerNormalize(config.reviewer || 'human');
-    const resp = await hitlApiFetch('/api/hitl/config', {
-        method: 'PUT',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            conversationId: conversationId,
-            enabled: enabled,
-            mode: mode,
-            reviewer: reviewer,
-            sensitiveTools: sensitiveTools,
-            timeoutSeconds: timeoutSeconds
-        })
+    const previous = hitlConversationConfigSaveQueues.get(normalizedConversationId) || Promise.resolve();
+    const queued = previous.catch(function () {}).then(async function () {
+        const resp = await hitlApiFetch('/api/hitl/config', {
+            method: 'PUT',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversationId: normalizedConversationId,
+                enabled: enabled,
+                mode: mode,
+                reviewer: reviewer,
+                sensitiveTools: sensitiveTools,
+                timeoutSeconds: timeoutSeconds
+            })
+        });
+        if (!resp.ok) {
+            const msg = await readHitlApiError(resp);
+            throw new Error(msg || ('HTTP ' + resp.status));
+        }
+        return true;
     });
-    if (!resp.ok) {
-        const msg = await readHitlApiError(resp);
-        throw new Error(msg || ('HTTP ' + resp.status));
-    }
-    return true;
+    hitlConversationConfigSaveQueues.set(normalizedConversationId, queued);
+    return queued.finally(function () {
+        if (hitlConversationConfigSaveQueues.get(normalizedConversationId) === queued) {
+            hitlConversationConfigSaveQueues.delete(normalizedConversationId);
+        }
+    });
 }
 
 async function syncHitlConfigFromServer(conversationId) {
@@ -534,44 +551,40 @@ async function syncHitlConfigFromServer(conversationId) {
         const local = readHitlLocalStorageConv(conversationId);
         const localMode = local && local.mode ? hitlModeNormalize(local.mode) : 'off';
         if (localMode !== 'off') {
+            const localReviewer = hitlReviewerNormalize(local && local.reviewer);
             let localToolsStr = typeof local.sensitiveTools === 'string' ? local.sensitiveTools : '';
             localToolsStr = strip(globalWL, localToolsStr);
             merged = {
                 enabled: true,
                 mode: localMode,
+                reviewer: localReviewer,
                 sensitiveTools: localToolsStr.split(/[,\n\r]+/).map(function (s) { return s.trim(); }).filter(Boolean),
-                timeoutSeconds: normalizeHitlTimeoutSeconds(cfg.timeoutSeconds, 0)
+                timeoutSeconds: normalizeHitlTimeoutSeconds(
+                    local && local.timeoutSeconds,
+                    normalizeHitlTimeoutSeconds(cfg.timeoutSeconds, 0)
+                )
             };
             saveHitlConversationConfig(conversationId, {
                 mode: localMode,
+                reviewer: localReviewer,
                 sensitiveTools: localToolsStr,
                 enabled: true,
                 timeoutSeconds: merged.timeoutSeconds
             }).catch(function (err) {
                 console.warn('HITL 会话配置同步到服务器失败（将仅保留本地 UI）:', err);
             });
-        } else {
-            const gl = typeof window.getHitlLastGlobalConfig === 'function' ? window.getHitlLastGlobalConfig() : null;
-            const glMode = gl && gl.mode ? hitlModeNormalize(gl.mode) : 'off';
-            if (glMode !== 'off') {
-                let glToolsStr = typeof gl.sensitiveTools === 'string' ? gl.sensitiveTools : '';
-                glToolsStr = strip(globalWL, glToolsStr);
-                merged = {
-                    enabled: true,
-                    mode: glMode,
-                    sensitiveTools: glToolsStr.split(/[,\n\r]+/).map(function (s) { return s.trim(); }).filter(Boolean),
-                    timeoutSeconds: normalizeHitlTimeoutSeconds(cfg.timeoutSeconds, 0)
-                };
-                saveHitlConversationConfig(conversationId, {
-                    mode: glMode,
-                    sensitiveTools: glToolsStr,
-                    enabled: true,
-                    timeoutSeconds: merged.timeoutSeconds
-                }).catch(function (err) {
-                    console.warn('HITL 会话配置同步到服务器失败（将仅保留本地 UI）:', err);
-                });
-            }
         }
+    }
+    if (shouldMigrateLegacyHitlTimeout(conversationId, merged.timeoutSeconds)) {
+        merged = Object.assign({}, merged, { timeoutSeconds: 300 });
+        try {
+            await saveHitlConversationConfig(conversationId, merged);
+            markLegacyHitlTimeoutMigrated(conversationId);
+        } catch (err) {
+            console.warn('HITL 旧会话等待时限迁移失败，将在下次加载时重试:', err);
+        }
+    } else if (normalizeHitlTimeoutSeconds(merged.timeoutSeconds, 0) > 0) {
+        markLegacyHitlTimeoutMigrated(conversationId);
     }
     const uiMode = hitlEffectiveEnabled(merged) ? hitlModeNormalize(merged.mode) : 'off';
     const rawArr = Array.isArray(merged.sensitiveTools)
@@ -590,7 +603,10 @@ async function syncHitlConfigFromServer(conversationId) {
             localStorage.setItem('chat_hitl_config_' + conversationId, JSON.stringify(normalizedCfg));
         } catch (e) {}
     }
-    if (typeof window.applyHitlConfigToUI === 'function') {
+    if (
+        getCurrentConversationIdForHitl() === conversationId &&
+        typeof window.applyHitlConfigToUI === 'function'
+    ) {
         window.applyHitlConfigToUI(normalizedCfg);
     }
     reconcileHitlUiState();
@@ -835,7 +851,11 @@ async function refreshHitlPending() {
             throw new Error('request failed');
         }
         const data = await resp.json();
-        const items = Array.isArray(data.items) ? data.items : [];
+        const rawItems = Array.isArray(data.items) ? data.items : [];
+        const items = rawItems.filter(function (item) {
+            return hitlReviewerNormalize(item && (item.reviewer || item.decidedBy || item.decided_by)) !== 'audit_agent' &&
+                String(item && item.status || '').trim().toLowerCase() !== 'audit_running';
+        });
         let workflowRuns = [];
         try {
             const wfResp = await hitlApiFetch('/api/workflows/runs/pending', { credentials: 'same-origin' });
@@ -856,7 +876,8 @@ async function refreshHitlPending() {
                 return conv.indexOf(searchQ) >= 0 || wfId.indexOf(searchQ) >= 0 || runId.indexOf(searchQ) >= 0 || label.indexOf(searchQ) >= 0;
             });
         }
-        hitlPendingTotal = (typeof data.total === 'number' ? data.total : items.length) + workflowRuns.length;
+        const hiddenAgentItems = rawItems.length - items.length;
+        hitlPendingTotal = Math.max(0, (typeof data.total === 'number' ? data.total : rawItems.length) - hiddenAgentItems) + workflowRuns.length;
         const maxPage = Math.max(1, Math.ceil(hitlPendingTotal / hitlPendingPageSize));
         if (hitlPendingPage > maxPage) {
             hitlPendingPage = maxPage;
@@ -1799,7 +1820,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (typeof window.bindHitlReviewerToggleListeners === 'function') {
         window.bindHitlReviewerToggleListeners();
     }
-    initHitlDefaultReviewerFromServer();
+    window.csaiHitlDefaultReviewerReady = initHitlDefaultReviewerFromServer();
     setTimeout(reconcileHitlUiState, 0);
 });
 

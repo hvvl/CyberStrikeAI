@@ -75,8 +75,11 @@ found:
 
 // responsePlanAgg buffers main-assistant response_stream chunks for one "planning" process_detail row.
 type responsePlanAgg struct {
-	meta map[string]interface{}
-	b    strings.Builder
+	meta            map[string]interface{}
+	b               strings.Builder
+	detailID        string
+	lastPersistAt   time.Time
+	lastPersistSize int
 }
 
 // thinkingBuf aggregates thinking_stream_* / reasoning_chain_stream_* before flush to process_details.
@@ -145,30 +148,36 @@ func responseStreamIterationFromMeta(m map[string]interface{}) int {
 	}
 }
 
-func discardPlanningIfEchoesToolResult(respPlan *responsePlanAgg, toolData interface{}) {
+func discardPlanningIfEchoesToolResult(respPlan *responsePlanAgg, toolData interface{}) string {
 	if respPlan == nil {
-		return
+		return ""
 	}
 	plan := normalizeProcessDetailText(respPlan.b.String())
 	if plan == "" {
-		return
+		return ""
 	}
 	dataMap, ok := toolData.(map[string]interface{})
 	if !ok {
-		return
+		return ""
 	}
 	res, ok := dataMap["result"].(string)
 	if !ok {
-		return
+		return ""
 	}
 	r := normalizeProcessDetailText(res)
 	if r == "" {
-		return
+		return ""
 	}
 	if plan == r || strings.HasSuffix(plan, r) {
+		detailID := respPlan.detailID
 		respPlan.meta = nil
 		respPlan.b.Reset()
+		respPlan.detailID = ""
+		respPlan.lastPersistAt = time.Time{}
+		respPlan.lastPersistSize = 0
+		return detailID
 	}
+	return ""
 }
 
 // AgentHandler Agent处理器
@@ -219,6 +228,20 @@ func (h *AgentHandler) CancelRunningTaskForConversation(conversationID string) {
 	} else if err != nil {
 		h.logger.Warn("取消会话运行中任务失败", zap.String("conversationId", conversationID), zap.Error(err))
 	}
+}
+
+// ConversationTaskRuntimeState exposes the authoritative live state and start
+// time used to scope persisted TaskCreate files to the current run. A task
+// already entering cancellation must stop driving progress UI immediately.
+func (h *AgentHandler) ConversationTaskRuntimeState(conversationID string) (bool, time.Time) {
+	if h == nil || h.tasks == nil || strings.TrimSpace(conversationID) == "" {
+		return false, time.Time{}
+	}
+	task := h.tasks.GetTaskSnapshot(strings.TrimSpace(conversationID))
+	if task == nil || !strings.EqualFold(strings.TrimSpace(task.Status), "running") {
+		return false, time.Time{}
+	}
+	return true, task.StartedAt
 }
 
 func (h *AgentHandler) cancelRunningMCPToolsForConversation(conversationID string) {
@@ -891,6 +914,32 @@ func (h *AgentHandler) publishProgressToTaskEventBus(conversationID, eventType, 
 	h.taskEventBus.Publish(conversationID, sseLine)
 }
 
+func isInternalEinoDiagnosticProgress(eventType, message string, data interface{}) bool {
+	switch eventType {
+	case "model_output_rejected":
+		return true
+	case "progress":
+		msg := strings.TrimSpace(message)
+		if msg == "Eino TurnLoop 常驻多轮 runtime 已接管本轮会话。" ||
+			msg == "Eino TurnLoop 已在安全点切换到用户补充后的下一轮。" ||
+			msg == "已将用户补充推入 Eino TurnLoop，正在等待安全点切换…" {
+			return true
+		}
+		m, ok := data.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		switch strings.TrimSpace(fmt.Sprint(m["kind"])) {
+		case "turn_loop_takeover", "turn_loop_preempted":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
 // enrichProgressEventData 为 SSE / taskEventBus 事件补齐 conversationId、messageId，便于前端懒加载过程详情。
 func enrichProgressEventData(data interface{}, conversationID, assistantMessageID string) interface{} {
 	if strings.TrimSpace(conversationID) == "" && strings.TrimSpace(assistantMessageID) == "" {
@@ -979,14 +1028,15 @@ func (h *AgentHandler) createProgressCallback(runCtx context.Context, cancelRun 
 	syncHitlCognition := func() {
 		h.syncHitlCognitionFromProgress(conversationID, assistantMessageID, thinkingStreams, &respPlan)
 	}
-	flushResponsePlan := func() {
+	persistResponsePlan := func(reset bool) {
 		if assistantMessageID == "" {
 			return
 		}
 		content := strings.TrimSpace(respPlan.b.String())
 		if content == "" {
-			respPlan.meta = nil
-			respPlan.b.Reset()
+			if reset {
+				respPlan = responsePlanAgg{}
+			}
 			return
 		}
 		data := map[string]interface{}{
@@ -995,13 +1045,26 @@ func (h *AgentHandler) createProgressCallback(runCtx context.Context, cancelRun 
 		for k, v := range respPlan.meta {
 			data[k] = v
 		}
-		if err := h.db.AddProcessDetail(assistantMessageID, conversationID, "planning", content, data); err != nil {
+		var err error
+		if respPlan.detailID == "" {
+			respPlan.detailID, err = h.db.AddProcessDetailWithID(
+				assistantMessageID, conversationID, "planning", content, data,
+			)
+		} else {
+			err = h.db.UpdateProcessDetailContent(respPlan.detailID, content, data)
+		}
+		if err != nil {
 			h.logger.Warn("保存过程详情失败", zap.Error(err), zap.String("eventType", "planning"))
+		} else {
+			respPlan.lastPersistAt = time.Now()
+			respPlan.lastPersistSize = respPlan.b.Len()
 		}
 		syncHitlCognition()
-		respPlan.meta = nil
-		respPlan.b.Reset()
+		if reset {
+			respPlan = responsePlanAgg{}
+		}
 	}
+	flushResponsePlan := func() { persistResponsePlan(true) }
 
 	flushThinkingStreams := func() {
 		if assistantMessageID == "" {
@@ -1042,6 +1105,10 @@ func (h *AgentHandler) createProgressCallback(runCtx context.Context, cancelRun 
 		progressMu.Lock()
 		defer progressMu.Unlock()
 
+		if isInternalEinoDiagnosticProgress(eventType, message, data) {
+			return
+		}
+
 		// 上游在重试/补偿时可能重复回调相同 tool_call/tool_result。
 		// 这里做幂等过滤，保证前端展示和 process_details 都以唯一事件为准。
 		if (eventType == "tool_call" || eventType == "tool_result") && data != nil {
@@ -1071,15 +1138,15 @@ func (h *AgentHandler) createProgressCallback(runCtx context.Context, cancelRun 
 		}
 
 		deferToolProgressSend := eventType == "tool_call" || eventType == "tool_result"
-		// 流式：写 HTTP SSE；非流式（机器人等）：镜像到 taskEventBus 供 Web 订阅。
-		// 工具事件需先落库拿 processDetailId，再向前端发送摘要，避免大 payload 默认进入浏览器。
+		// 主 HTTP SSE 与 taskEventBus 必须同时写入：页面刷新会切断原连接，刷新后的
+		// GET task-events 订阅依赖 eventBus 才能继续收到后续迭代。机器人等无主 SSE
+		// 的来源同样只写 eventBus。工具事件需先落库拿 processDetailId，再发送摘要。
 		if !deferToolProgressSend {
 			clientData := enrichProgressEventData(data, conversationID, assistantMessageID)
 			if sendEventFunc != nil {
 				sendEventFunc(eventType, message, clientData)
-			} else {
-				h.publishProgressToTaskEventBus(conversationID, eventType, message, clientData)
 			}
+			h.publishProgressToTaskEventBus(conversationID, eventType, message, clientData)
 		}
 
 		// 保存tool_call事件中的参数
@@ -1332,6 +1399,14 @@ func (h *AgentHandler) createProgressCallback(runCtx context.Context, cancelRun 
 					respPlan.meta[k] = v
 				}
 			}
+			// 运行中的主回复不能只保存在内存：刷新会销毁旧页面，新的 task-events
+			// 订阅只能收到未来增量。按时间或增量大小节流更新同一条 planning 记录，
+			// 这样刷新时能从数据库恢复刷新前已经展示的全部文本。
+			if respPlan.lastPersistAt.IsZero() ||
+				time.Since(respPlan.lastPersistAt) >= 300*time.Millisecond ||
+				respPlan.b.Len()-respPlan.lastPersistSize >= 1024 {
+				persistResponsePlan(false)
+			}
 			syncHitlCognition()
 			return
 		}
@@ -1442,7 +1517,11 @@ func (h *AgentHandler) createProgressCallback(runCtx context.Context, cancelRun 
 			eventType != "eino_agent_reply_stream_delta" &&
 			eventType != "eino_agent_reply_stream_end" {
 			if eventType == "tool_result" {
-				discardPlanningIfEchoesToolResult(&respPlan, data)
+				if detailID := discardPlanningIfEchoesToolResult(&respPlan, data); detailID != "" {
+					if err := h.db.DeleteProcessDetail(detailID); err != nil {
+						h.logger.Warn("删除工具结果回显规划失败", zap.Error(err), zap.String("processDetailId", detailID))
+					}
+				}
 			}
 			// 在关键过程事件落库前，先把「规划中」与聚合中的 thinking / reasoning_chain 流落库
 			flushResponsePlan()
@@ -1458,17 +1537,15 @@ func (h *AgentHandler) createProgressCallback(runCtx context.Context, cancelRun 
 				}
 				if sendEventFunc != nil {
 					sendEventFunc(eventType, message, clientData)
-				} else {
-					h.publishProgressToTaskEventBus(conversationID, eventType, message, clientData)
 				}
+				h.publishProgressToTaskEventBus(conversationID, eventType, message, clientData)
 			}
 		} else if deferToolProgressSend {
 			clientData := enrichProgressEventData(summarizeProcessDetailData(eventType, data), conversationID, assistantMessageID)
 			if sendEventFunc != nil {
 				sendEventFunc(eventType, message, clientData)
-			} else {
-				h.publishProgressToTaskEventBus(conversationID, eventType, message, clientData)
 			}
+			h.publishProgressToTaskEventBus(conversationID, eventType, message, clientData)
 		}
 	}
 }

@@ -1380,6 +1380,39 @@ func (db *DB) AddProcessDetailWithID(messageID, conversationID, eventType, messa
 	return id, nil
 }
 
+// UpdateProcessDetailContent 更新流式聚合详情的正文与元数据。使用固定记录 ID，
+// 避免每个 token 新增一行，同时让页面刷新能读取到尚未结束的规划输出。
+func (db *DB) UpdateProcessDetailContent(id, message string, data interface{}) error {
+	var dataJSON string
+	if data != nil {
+		jsonData, err := json.Marshal(data)
+		if err != nil {
+			return fmt.Errorf("序列化过程详情数据失败: %w", err)
+		}
+		dataJSON = string(jsonData)
+	}
+	result, err := db.Exec(
+		"UPDATE process_details SET message = ?, data = ? WHERE id = ?",
+		message, dataJSON, strings.TrimSpace(id),
+	)
+	if err != nil {
+		return fmt.Errorf("更新过程详情失败: %w", err)
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr == nil && affected == 0 {
+		return fmt.Errorf("过程详情不存在: %s", id)
+	}
+	return nil
+}
+
+// DeleteProcessDetail 删除被判定为工具结果回显的临时规划记录。
+func (db *DB) DeleteProcessDetail(id string) error {
+	_, err := db.Exec("DELETE FROM process_details WHERE id = ?", strings.TrimSpace(id))
+	if err != nil {
+		return fmt.Errorf("删除过程详情失败: %w", err)
+	}
+	return nil
+}
+
 // GetProcessDetails 获取消息的过程详情
 func (db *DB) GetProcessDetails(messageID string) ([]ProcessDetail, error) {
 	rows, err := db.Query(
@@ -1447,6 +1480,10 @@ type ProcessDetailsSummary struct {
 	ToolCount       int                           `json:"toolCount"`
 	ToolExecutions  []ProcessDetailsToolExecution `json:"toolExecutions,omitempty"`
 	MCPExecutionIDs []string                      `json:"mcpExecutionIds,omitempty"`
+	StartedAt       *time.Time                    `json:"startedAt,omitempty"`
+	CompletedAt     *time.Time                    `json:"completedAt,omitempty"`
+	DurationMs      int64                         `json:"durationMs"`
+	Status          string                        `json:"status,omitempty"`
 }
 
 type ProcessDetailsToolExecution struct {
@@ -1469,6 +1506,54 @@ func (db *DB) GetProcessDetailsSummary(messageID string) (*ProcessDetailsSummary
 	}
 
 	summary := &ProcessDetailsSummary{Total: total}
+	var messageCreatedAt, messageUpdatedAt sql.NullString
+	var messageContent string
+	if err := db.QueryRow(
+		"SELECT created_at, updated_at, content FROM messages WHERE id = ?",
+		messageID,
+	).Scan(&messageCreatedAt, &messageUpdatedAt, &messageContent); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("查询过程详情耗时失败: %w", err)
+	}
+	if messageCreatedAt.Valid {
+		if startedAt := parseDBTime(messageCreatedAt.String); !startedAt.IsZero() {
+			summary.StartedAt = &startedAt
+		}
+	}
+	var terminalEvent, terminalCreatedAt string
+	terminalErr := db.QueryRow(`
+SELECT event_type, created_at
+FROM process_details
+WHERE message_id = ? AND event_type IN ('cancelled', 'timeout', 'error')
+ORDER BY created_at DESC, rowid DESC
+LIMIT 1`, messageID).Scan(&terminalEvent, &terminalCreatedAt)
+	if terminalErr != nil && !errors.Is(terminalErr, sql.ErrNoRows) {
+		return nil, fmt.Errorf("查询过程详情终态失败: %w", terminalErr)
+	}
+	if terminalEvent != "" {
+		switch terminalEvent {
+		case "cancelled":
+			summary.Status = "cancelled"
+		case "timeout":
+			summary.Status = "timeout"
+		default:
+			summary.Status = "failed"
+		}
+		if completedAt := parseDBTime(terminalCreatedAt); !completedAt.IsZero() {
+			summary.CompletedAt = &completedAt
+		}
+	} else if strings.TrimSpace(messageContent) == "处理中..." || strings.TrimSpace(messageContent) == "Processing..." {
+		summary.Status = "running"
+	} else {
+		summary.Status = "completed"
+		if messageUpdatedAt.Valid {
+			if completedAt := parseDBTime(messageUpdatedAt.String); !completedAt.IsZero() {
+				summary.CompletedAt = &completedAt
+			}
+		}
+	}
+	if summary.StartedAt != nil && summary.CompletedAt != nil && !summary.CompletedAt.Before(*summary.StartedAt) {
+		summary.DurationMs = summary.CompletedAt.Sub(*summary.StartedAt).Milliseconds()
+	}
 	if total == 0 {
 		return summary, nil
 	}
@@ -1490,12 +1575,12 @@ func (db *DB) GetProcessDetailsSummary(messageID string) (*ProcessDetailsSummary
 	seenExecIDs := make(map[string]bool)
 	// A provider may reuse a fallback toolCallId across streaming rounds. Keep a
 	// FIFO per ID instead of a single index so every persisted call gets at most
-	// one result. Results without a stable ID are kept separate instead of being
-	// guessed by order; showing no link is safer than linking to the wrong tool.
+	// one result. ID-less results still attach to an unmatched call with the same
+	// tool name (parallel nmap 1/2, 2/2 often lose one ID); different tools stay
+	// unlinked so a leftover preview cannot steal another call's slot.
 	toolIndexesByCallID := make(map[string][]int)
 	lastMatchedToolIndexByCallID := make(map[string]int)
 	matchedToolIndexes := make([]bool, 0)
-	nextUnmatchedToolIdx := 0
 	for execRows.Next() {
 		var detailID string
 		var eventType string
@@ -1511,24 +1596,10 @@ func (db *DB) GetProcessDetailsSummary(messageID string) (*ProcessDetailsSummary
 		if err := json.Unmarshal([]byte(dataJSON), &payload); err != nil {
 			continue
 		}
-		toolName, _ := payload["toolName"].(string)
-		toolName = strings.TrimSpace(toolName)
-		toolCallID, _ := payload["toolCallId"].(string)
-		toolCallID = strings.TrimSpace(toolCallID)
-		execID, _ := payload["executionId"].(string)
-		execID = strings.TrimSpace(execID)
-		status := ""
-		if eventType == "tool_result" {
-			if success, ok := payload["success"].(bool); ok {
-				if success {
-					status = "completed"
-				} else {
-					status = "failed"
-				}
-			} else if isErr, ok := payload["isError"].(bool); ok && isErr {
-				status = "failed"
-			}
-		}
+		toolName := processDetailString(payload, "toolName")
+		toolCallID := processDetailString(payload, "toolCallId")
+		execID := processDetailString(payload, "executionId")
+		status := toolResultStatusFromPayload(payload, eventType)
 		if eventType == "tool_call" {
 			summary.ToolExecutions = append(summary.ToolExecutions, ProcessDetailsToolExecution{
 				ProcessDetailID: strings.TrimSpace(detailID),
@@ -1545,36 +1616,14 @@ func (db *DB) GetProcessDetailsSummary(messageID string) (*ProcessDetailsSummary
 			}
 		}
 		if eventType == "tool_result" {
-			idx := -1
-			if toolCallID != "" {
-				queue := toolIndexesByCallID[toolCallID]
-				for len(queue) > 0 {
-					candidate := queue[0]
-					queue = queue[1:]
-					if candidate >= 0 && candidate < len(matchedToolIndexes) && !matchedToolIndexes[candidate] {
-						idx = candidate
-						break
-					}
-				}
-				toolIndexesByCallID[toolCallID] = queue
-				if idx < 0 {
-					// Multiple persisted result events for one call (for example an
-					// agent-facing reduced result replacing an earlier preview) update
-					// that call instead of consuming an unrelated FIFO entry.
-					if previous, ok := lastMatchedToolIndexByCallID[toolCallID]; ok {
-						idx = previous
-					}
-				}
-			}
-			if idx < 0 && toolCallID != "" {
-				for nextUnmatchedToolIdx < len(matchedToolIndexes) && matchedToolIndexes[nextUnmatchedToolIdx] {
-					nextUnmatchedToolIdx++
-				}
-				if nextUnmatchedToolIdx < len(matchedToolIndexes) {
-					idx = nextUnmatchedToolIdx
-					nextUnmatchedToolIdx++
-				}
-			}
+			idx := matchToolExecutionIndex(
+				summary.ToolExecutions,
+				matchedToolIndexes,
+				toolCallID,
+				toolName,
+				toolIndexesByCallID,
+				lastMatchedToolIndexByCallID,
+			)
 			if idx >= 0 && idx < len(summary.ToolExecutions) {
 				matchedToolIndexes[idx] = true
 				if toolCallID != "" {
@@ -1590,6 +1639,8 @@ func (db *DB) GetProcessDetailsSummary(messageID string) (*ProcessDetailsSummary
 				summary.ToolExecutions[idx].ExecutionID = execID
 				if status != "" {
 					summary.ToolExecutions[idx].Status = status
+				} else {
+					summary.ToolExecutions[idx].Status = "completed"
 				}
 			} else {
 				summary.ToolExecutions = append(summary.ToolExecutions, ProcessDetailsToolExecution{
@@ -1644,6 +1695,82 @@ func (db *DB) GetProcessDetailsSummary(messageID string) (*ProcessDetailsSummary
 	summary.IterationCount = iterCount
 	summary.MaxIteration = maxIter
 	return summary, nil
+}
+
+func processDetailString(payload map[string]interface{}, key string) string {
+	if payload == nil {
+		return ""
+	}
+	v, ok := payload[key]
+	if !ok || v == nil {
+		return ""
+	}
+	s := strings.TrimSpace(fmt.Sprint(v))
+	if s == "" || s == "<nil>" {
+		return ""
+	}
+	return s
+}
+
+func toolResultStatusFromPayload(payload map[string]interface{}, eventType string) string {
+	if eventType != "tool_result" {
+		return ""
+	}
+	if status := processDetailString(payload, "status"); strings.EqualFold(status, "background_running") {
+		return "background_running"
+	}
+	if success, ok := payload["success"].(bool); ok {
+		if success {
+			return "completed"
+		}
+		return "failed"
+	}
+	if isErr, ok := payload["isError"].(bool); ok && isErr {
+		return "failed"
+	}
+	return "completed"
+}
+
+func matchToolExecutionIndex(
+	executions []ProcessDetailsToolExecution,
+	matched []bool,
+	toolCallID, toolName string,
+	toolIndexesByCallID map[string][]int,
+	lastMatchedToolIndexByCallID map[string]int,
+) int {
+	if toolCallID != "" {
+		queue := toolIndexesByCallID[toolCallID]
+		for len(queue) > 0 {
+			candidate := queue[0]
+			queue = queue[1:]
+			if candidate >= 0 && candidate < len(matched) && !matched[candidate] {
+				toolIndexesByCallID[toolCallID] = queue
+				return candidate
+			}
+		}
+		toolIndexesByCallID[toolCallID] = queue
+		if previous, ok := lastMatchedToolIndexByCallID[toolCallID]; ok {
+			return previous
+		}
+	}
+	if toolName != "" {
+		for i := range matched {
+			if matched[i] {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(executions[i].ToolName), toolName) {
+				return i
+			}
+		}
+	}
+	if toolCallID != "" {
+		for i := range matched {
+			if !matched[i] {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // GetProcessDetailsPage 分页获取消息的过程详情（按时间升序）。
