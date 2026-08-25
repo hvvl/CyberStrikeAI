@@ -57,6 +57,26 @@ const (
 	MaxBatchQueueConcurrency = 8
 )
 
+// batchTaskResultPreviewBytes 内存任务对象中 Result 的预览截断上限。
+// UI 详情弹窗只展示 result.substring(0,200)，完整文本在 DB（batch_tasks.result）
+// 与子会话 messages 表均有副本；全量驻留内存（单队列 10000 任务 × 数 KB~数十 KB）
+// 是「停止任务内存不回落」的直接来源之一。DB 写入仍为全量。
+const batchTaskResultPreviewBytes = 2048
+
+// batchTaskResultPreview 按字节截断 Result 做内存预览。
+// UTF-8 边界回退不能只判断末尾字节是否 RuneStart——被截断字符的孤立首字节同样
+// 是 RuneStart，会漏判；必须以整体 utf8.ValidString 为准（最坏回退 3 字节）。
+func batchTaskResultPreview(result string) string {
+	if len(result) <= batchTaskResultPreviewBytes {
+		return result
+	}
+	cut := result[:batchTaskResultPreviewBytes]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut
+}
+
 // BatchTask 批量任务项
 type BatchTask struct {
 	ID             string     `json:"id"`
@@ -419,7 +439,8 @@ func (m *BatchTaskManager) loadQueueFromDB(queueID string) *BatchTaskQueue {
 			task.Error = taskRow.Error.String
 		}
 		if taskRow.Result.Valid {
-			task.Result = taskRow.Result.String
+			// 内存仅保留预览；完整文本留在 DB（batch_tasks.result）。
+			task.Result = batchTaskResultPreview(taskRow.Result.String)
 		}
 		queue.Tasks = append(queue.Tasks, task)
 	}
@@ -666,7 +687,8 @@ func (m *BatchTaskManager) LoadFromDB() error {
 				task.Error = taskRow.Error.String
 			}
 			if taskRow.Result.Valid {
-				task.Result = taskRow.Result.String
+				// 内存仅保留预览；完整文本留在 DB（batch_tasks.result）。
+				task.Result = batchTaskResultPreview(taskRow.Result.String)
 			}
 			queue.Tasks = append(queue.Tasks, task)
 		}
@@ -705,7 +727,8 @@ func (m *BatchTaskManager) UpdateTaskStatusWithConversationID(queueID, taskID, s
 		if task.ID == taskID {
 			task.Status = status
 			if result != "" {
-				task.Result = result
+				// 内存仅保留预览（完整文本已由 DB 写入），防大批量任务 RSS 无上界。
+				task.Result = batchTaskResultPreview(result)
 			}
 			if errorMsg != "" {
 				task.Error = errorMsg
@@ -1500,4 +1523,69 @@ func generateShortID() string {
 	b := make([]byte, 4)
 	rand.Read(b)
 	return time.Now().Format("150405") + "-" + hex.EncodeToString(b)
+}
+
+// recoverInterruptedQueuesLastRunError 进程中断回滚时写入 last_run_error 的提示文案。
+const recoverInterruptedQueuesLastRunError = "进程意外中断：队列已从断点回滚为暂停，点击「继续执行」可恢复"
+
+// RecoverInterruptedQueues 启动恢复：进程硬终止（崩溃/断电/强杀）后重启，
+// LoadFromDB 会原样恢复 running 状态——但没有执行器在跑，队列卡死；
+// 且 ClaimNextPendingTask 只认领 pending 任务，崩溃瞬间的 running 子任务
+// 变僵尸、永远不会被重新认领。此处把 running 队列回滚为 paused、
+// running 子任务回滚为 pending（DB 优先持久化），用户「继续执行」即可从断点恢复。
+func (m *BatchTaskManager) RecoverInterruptedQueues() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	recovered := 0
+	for queueID, queue := range m.queues {
+		if queue == nil || queue.Status != BatchQueueStatusRunning {
+			continue
+		}
+		// DB 优先：先持久化回滚，成功后再更新内存
+		if m.db != nil {
+			if err := m.recoverInterruptedQueueTasksInDBLocked(queueID); err != nil {
+				m.logger.Warn("回滚中断队列子任务失败，跳过该队列",
+					zap.String("queueId", queueID), zap.Error(err))
+				continue
+			}
+			if err := m.db.UpdateBatchQueueStatus(queueID, BatchQueueStatusPaused); err != nil {
+				m.logger.Warn("回滚中断队列状态失败，跳过该队列",
+					zap.String("queueId", queueID), zap.Error(err))
+				continue
+			}
+			if err := m.db.SetBatchQueueLastRunError(queueID, recoverInterruptedQueuesLastRunError); err != nil {
+				m.logger.Warn("写入中断提示失败", zap.String("queueId", queueID), zap.Error(err))
+			}
+		}
+
+		queue.Status = BatchQueueStatusPaused
+		rolledBack := 0
+		for _, task := range queue.Tasks {
+			if task != nil && task.Status == BatchTaskStatusRunning {
+				task.Status = BatchTaskStatusPending
+				task.StartedAt = nil
+				task.CompletedAt = nil
+				task.Error = ""
+				rolledBack++
+			}
+		}
+		recovered++
+		m.logger.Info("已回滚中断的批量任务队列",
+			zap.String("queueId", queueID),
+			zap.Int("rolledBackTasks", rolledBack))
+	}
+	return recovered
+}
+
+// recoverInterruptedQueueTasksInDBLocked 把指定队列的 running 子任务批量回滚为 pending。
+// 调用方持有 m.mu。
+func (m *BatchTaskManager) recoverInterruptedQueueTasksInDBLocked(queueID string) error {
+	if m.db == nil {
+		return nil
+	}
+	if err := m.db.RecoverInterruptedBatchTasks(queueID); err != nil {
+		return err
+	}
+	return nil
 }

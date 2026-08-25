@@ -269,6 +269,11 @@ func NewAgentHandler(agent *agent.Agent, db *database.DB, cfg *config.Config, lo
 	if err := batchTaskManager.LoadFromDB(); err != nil {
 		logger.Warn("从数据库加载批量任务队列失败", zap.Error(err))
 	}
+	// 进程硬终止（崩溃/断电/强杀）后重启：把 running 队列回滚为 paused、
+	// running 子任务回滚为 pending，用户「继续执行」即可从断点恢复。
+	if recovered := batchTaskManager.RecoverInterruptedQueues(); recovered > 0 {
+		logger.Info("已回滚中断的批量任务队列", zap.Int("recovered", recovered))
+	}
 
 	bus := NewTaskEventBus()
 	tm := NewAgentTaskManager()
@@ -2103,6 +2108,54 @@ func (h *AgentHandler) PauseBatchQueue(c *gin.Context) {
 		h.audit.RecordOK(c, "task", "pause_queue", "暂停批量任务队列", "batch_queue", queueID, nil)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "批量任务已暂停"})
+}
+
+// ResumeInterruptedBatchQueues 一键继续所有意外停止的任务队列。
+// 启动所有 paused（含启动恢复回滚的、手工暂停的）与 pending 队列；
+// 跳过 running（执行器在跑）、completed/cancelled（终态）、
+// 等待 Cron 定时触发的 pending 队列（避免把定时队列提前打一轮）；
+// 逐队列 RBAC 资源校验（单个无权计入 skipped，不阻塞其余）。
+func (h *AgentHandler) ResumeInterruptedBatchQueues(c *gin.Context) {
+	queues := h.batchTaskManager.GetAllQueues()
+	started := 0
+	skipped := 0
+	for _, queue := range queues {
+		if queue == nil {
+			continue
+		}
+		switch queue.Status {
+		case BatchQueueStatusPaused:
+			// 恢复执行
+		case BatchQueueStatusPending:
+			// 等待 Cron 定时触发的队列不提前启动
+			if queue.ScheduleMode == "cron" && queue.ScheduleEnabled {
+				skipped++
+				continue
+			}
+		default:
+			// running / completed / cancelled
+			continue
+		}
+		// 逐队列 RBAC 资源校验：单个无权计入 skipped，不阻塞其余
+		if h.db != nil {
+			if session, ok := security.CurrentSession(c); ok && session.Scope != database.RBACScopeAll {
+				if !h.db.UserCanAccessResource(session.UserID, session.Scope, "batch_task", queue.ID) {
+					skipped++
+					continue
+				}
+			}
+		}
+		h.batchTaskManager.ClearSingleRunTask(queue.ID)
+		if ok, err := h.startBatchQueueExecution(queue.ID, false); ok && err == nil {
+			started++
+		} else {
+			skipped++
+		}
+	}
+	if h.audit != nil {
+		h.audit.RecordOK(c, "task", "resume_interrupted", "一键继续中断队列", "batch_queue", "", map[string]interface{}{"started": started, "skipped": skipped})
+	}
+	c.JSON(http.StatusOK, gin.H{"started": started, "skipped": skipped})
 }
 
 // UpdateBatchQueueMetadata 修改批量任务队列的标题、角色和代理模式

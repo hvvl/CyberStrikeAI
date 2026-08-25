@@ -562,6 +562,19 @@ func (db *DB) CancelPendingBatchTasks(queueID string, completedAt time.Time) err
 	return nil
 }
 
+// RecoverInterruptedBatchTasks 进程硬终止后重启：把队列中 running 子任务批量回滚为
+// pending（清空 started_at/completed_at/error），使其可被 ClaimNextPendingTask 重新认领。
+func (db *DB) RecoverInterruptedBatchTasks(queueID string) error {
+	_, err := db.Exec(
+		"UPDATE batch_tasks SET status = ?, started_at = NULL, completed_at = NULL, error = NULL WHERE queue_id = ? AND status = ?",
+		"pending", queueID, "running",
+	)
+	if err != nil {
+		return fmt.Errorf("回滚中断 running 任务失败: %w", err)
+	}
+	return nil
+}
+
 // PrepareBatchSingleTaskRun 准备单条执行：可选重置子任务，并更新队列索引与状态
 func (db *DB) PrepareBatchSingleTaskRun(queueID, taskID string, taskIndex int, resetTask, resumeQueue bool) error {
 	tx, err := db.Begin()

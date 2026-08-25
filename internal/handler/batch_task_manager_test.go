@@ -2,7 +2,10 @@ package handler
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
+
+	"cyberstrike-ai/internal/database"
 
 	"go.uber.org/zap"
 )
@@ -129,5 +132,61 @@ func TestTryMarkQueueExecutorDedupes(t *testing.T) {
 	m.UnmarkQueueExecutor("q-1")
 	if !m.TryMarkQueueExecutor("q-1") {
 		t.Fatal("mark after unmark should succeed")
+	}
+}
+
+// TestRecoverInterruptedQueues 构造崩溃现场（running 队列 + running/pending 子任务），
+// 断言 RecoverInterruptedQueues 回滚为 paused/pending，且重启 LoadFromDB 后持久化仍在。
+func TestRecoverInterruptedQueues(t *testing.T) {
+	t.Parallel()
+
+	db, err := database.NewDB(filepath.Join(t.TempDir(), "recover-interrupted.db"), zap.NewNop())
+	if err != nil {
+		t.Fatalf("NewDB: %v", err)
+	}
+
+	m := NewBatchTaskManager(zap.NewNop())
+	m.SetDB(db)
+	queue, err := m.CreateBatchQueue("崩溃现场", "", "eino_single", "manual", "", "", "", nil, 1,
+		[]string{"t1", "t2", "t3"})
+	if err != nil {
+		t.Fatalf("CreateBatchQueue: %v", err)
+	}
+	// 模拟崩溃瞬间的状态：队列 running，t1/t2 已认领（running），t3 待执行
+	m.UpdateQueueStatus(queue.ID, BatchQueueStatusRunning)
+	m.ClaimNextPendingTask(queue.ID)
+	m.ClaimNextPendingTask(queue.ID)
+
+	recovered := m.RecoverInterruptedQueues()
+	if recovered != 1 {
+		t.Fatalf("expected 1 recovered queue, got %d", recovered)
+	}
+	q, ok := m.GetBatchQueue(queue.ID)
+	if !ok || q.Status != BatchQueueStatusPaused {
+		t.Fatalf("queue should be paused after recovery, got %+v", q)
+	}
+	for _, task := range q.Tasks {
+		if task.Status != BatchTaskStatusPending {
+			t.Fatalf("task %s should be pending after recovery, got %s", task.ID, task.Status)
+		}
+	}
+
+	// 模拟重启：新建 manager 从 DB 加载，验证持久化生效（队列 paused、任务 pending）
+	m2 := NewBatchTaskManager(zap.NewNop())
+	m2.SetDB(db)
+	if err := m2.LoadFromDB(); err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	q2, ok := m2.GetBatchQueue(queue.ID)
+	if !ok {
+		t.Fatal("queue should survive restart")
+	}
+	if q2.Status != BatchQueueStatusPaused {
+		t.Fatalf("queue should stay paused after restart, got %s", q2.Status)
+	}
+	for _, task := range q2.Tasks {
+		if task.Status != BatchTaskStatusPending {
+			t.Fatalf("task %s should stay pending after restart, got %s", task.ID, task.Status)
+		}
 	}
 }

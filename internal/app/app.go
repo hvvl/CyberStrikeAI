@@ -633,6 +633,10 @@ func (a *App) Run() error {
 
 // RunWithContext 启动应用，支持通过 context 取消来优雅关闭
 func (a *App) RunWithContext(ctx context.Context) error {
+	// 可选 pprof 诊断监听（server.pprof_addr；无鉴权，仅绑回环地址）
+	stopPprof := startPprofServer(a.config.Server.PprofAddr, a.logger.Logger)
+	defer stopPprof()
+
 	// 启动MCP服务器（如果启用）
 	var mcpServer *http.Server
 	if a.config.MCP.Enabled {
@@ -1017,7 +1021,9 @@ func setupRoutes(
 		protected.GET("/batch-tasks", agentHandler.ListBatchQueues)
 		// CSV 批量派发（静态段必须注册在 :queueId 参数段之前）
 		protected.POST("/batch-tasks/dispatch", agentHandler.DispatchBatchTasks)
+		protected.POST("/batch-tasks/resume-interrupted", agentHandler.ResumeInterruptedBatchQueues)
 		protected.POST("/batch-tasks/group/:groupId/start", agentHandler.StartBatchGroup)
+		protected.POST("/batch-tasks/group/:groupId/pause", agentHandler.PauseBatchGroup)
 		protected.POST("/batch-tasks/group/:groupId/cancel", agentHandler.CancelBatchGroup)
 		protected.GET("/batch-tasks/:queueId", agentHandler.GetBatchQueue)
 		protected.POST("/batch-tasks/:queueId/start", agentHandler.StartBatchQueue)
