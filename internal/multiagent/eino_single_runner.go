@@ -215,7 +215,11 @@ func RunEinoSingleChatModelAgent(
 		SnapshotMCPIDs:          snapshotMCPIDs,
 		StreamsMainAssistant:    streamsMainAssistant,
 		EinoRoleTag:             einoRoleTag,
-		CheckpointDir:           ma.EinoMiddleware.CheckpointDir,
+		// Chat history recovery is intentionally centralized in last_react_*.
+		// ADK checkpoints are a second persisted model-state channel and make
+		// stale-context bugs hard to reason about across user turns.（上游 baff533：
+		// 禁用聊天链路 checkpoint，与我们取消路径清轨迹的修复方向一致）
+		CheckpointDir:           "",
 		RunRetryMaxAttempts:     retryAttempts,
 		RunRetryMaxBackoffSec:   retryBackoffSec,
 		ChannelID:               appCfg.AI.DefaultChannel,
