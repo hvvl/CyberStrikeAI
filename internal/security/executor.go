@@ -1055,7 +1055,7 @@ func combinedOutputCancellableWithLimit(ctx context.Context, cmd *exec.Cmd, maxB
 	go func() {
 		select {
 		case <-ctx.Done():
-			TerminateShellCmdSession(session)
+			terminateShellCmdSessionAndPipes(session)
 		case <-stopWatch:
 		}
 	}()
@@ -1259,7 +1259,7 @@ func streamCommandOutput(ctx context.Context, cmd *exec.Cmd, cb ToolOutputCallba
 	go func() {
 		select {
 		case <-ctx.Done():
-			TerminateShellCmdSession(session)
+			terminateShellCmdSessionAndPipes(session, stdoutPipe, stderrPipe)
 		case <-stopWatch:
 		}
 	}()
@@ -1289,6 +1289,14 @@ func streamCommandOutput(ctx context.Context, cmd *exec.Cmd, cb ToolOutputCallba
 		wg.Wait()
 		close(chunks)
 	}()
+	// drainer 兜底：消费方（本函数）提前退出后仍排空 chunks，
+	// 防止 readFn 卡在发送侧导致 wg.Wait 永不返回（goroutine 泄漏）。
+	defer func() {
+		go func() {
+			for range chunks {
+			}
+		}()
+	}()
 
 	tee := (*tooloutput.Tee)(nil)
 	if maxBytes > 0 {
@@ -1316,7 +1324,7 @@ func streamCommandOutput(ctx context.Context, cmd *exec.Cmd, cb ToolOutputCallba
 	}
 
 	fireInactivity := func() {
-		TerminateShellCmdSession(session)
+		terminateShellCmdSessionAndPipes(session, stdoutPipe, stderrPipe)
 		msg := ShellNoOutputTimeoutMessage(idleWatch.Sec)
 		msg = outBuilder.WriteStringLimited(msg)
 		if cb != nil {
@@ -1333,7 +1341,7 @@ chunksLoop:
 		}
 		select {
 		case <-ctx.Done():
-			TerminateShellCmdSession(session)
+			terminateShellCmdSessionAndPipes(session, stdoutPipe, stderrPipe)
 			flush()
 			_ = session.Wait()
 			return outBuilder.String(), ctx.Err()

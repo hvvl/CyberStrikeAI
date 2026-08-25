@@ -32,6 +32,14 @@ func TerminateShellCmdSession(session *ShellSession) {
 	TerminateShellSession(session)
 }
 
+// terminateShellCmdSessionAndPipes 终止会话进程组并强制解除管道读端阻塞：
+// kill(-pgid) 杀不掉逃逸进程组的孙进程（setsid/nohup/二次 fork），它们继承的
+// 管道写端会让 readFn 永久阻塞——必须用 ReadDeadline 强制唤醒（内存泄漏修复 C）。
+func terminateShellCmdSessionAndPipes(session *ShellSession, readers ...io.Reader) {
+	TerminateShellSession(session)
+	forceUnblockPipeRead(readers...)
+}
+
 // EinoStreamingShell 为 Eino ADK execute 工具提供流式 shell，行为与 exec 对齐：
 // 并发读取 stdout/stderr（定长块，非按行），避免官方 local.ExecuteStreaming 先排空 stdout
 // 导致 stderr 错误（如 sudo 密码提示）长时间不可见、UI 一直显示「执行中」。
@@ -93,7 +101,7 @@ func runShellInBackground(ctx context.Context, command string, w *schema.StreamW
 	select {
 	case <-done:
 	case <-ctx.Done():
-		TerminateShellCmdSession(session)
+		terminateShellCmdSessionAndPipes(session, stdout, stderr)
 	}
 
 	exitCode := 0
@@ -148,7 +156,7 @@ func streamShellForeground(ctx context.Context, command string, w *schema.Stream
 	go func() {
 		select {
 		case <-ctx.Done():
-			TerminateShellCmdSession(session)
+			terminateShellCmdSessionAndPipes(session, stdoutPipe, stderrPipe)
 		case <-stopWatch:
 		}
 	}()
@@ -177,6 +185,14 @@ func streamShellForeground(ctx context.Context, command string, w *schema.Stream
 		wg.Wait()
 		close(chunks)
 	}()
+	// drainer 兜底：消费方（本函数）提前退出后仍排空 chunks，
+	// 防止 readFn 卡在发送侧导致 wg.Wait 永不返回（goroutine 泄漏）。
+	defer func() {
+		go func() {
+			for range chunks {
+			}
+		}()
+	}()
 
 	hadOutput := false
 	for chunk := range chunks {
@@ -185,7 +201,7 @@ func streamShellForeground(ctx context.Context, command string, w *schema.Stream
 		}
 		hadOutput = true
 		if w.Send(&filesystem.ExecuteResponse{Output: chunk}, nil) {
-			TerminateShellCmdSession(session)
+			terminateShellCmdSessionAndPipes(session, stdoutPipe, stderrPipe)
 			return
 		}
 	}
