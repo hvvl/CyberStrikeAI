@@ -32,7 +32,14 @@ func recvEinoSchemaMessageStreamWithContext(
 		defer close(recvCh)
 		for {
 			ch, rerr := stream.Recv()
-			recvCh <- streamMsg{chunk: ch, err: rerr}
+			// 发送必须带 ctx 逃生：消费方因 ctx 取消提前返回后，泵阻塞在向满缓冲
+			// recvCh 的裸发送上，永久持有 stream 及其上游链（pprof 实测：1 个残留泵
+			// 持有 118MB peek 缓冲）。内存修复 F。
+			select {
+			case recvCh <- streamMsg{chunk: ch, err: rerr}:
+			case <-ctx.Done():
+				return
+			}
 			if rerr != nil {
 				return
 			}

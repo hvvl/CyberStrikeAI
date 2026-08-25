@@ -673,14 +673,14 @@ func RunDeepAgent(
 	// 重试耗尽时按「本 run 内最近失败通道」归属，并发会话互不串扰（审计 P1-3）。
 	runCtx, failedCollector := withFailedChannelCollector(ctx)
 	result, runErr := runEinoADKAgentLoop(runCtx, &einoADKRunLoopArgs{
-		OrchMode:                orchMode,
-		OrchestratorName:        orchestratorName,
-		ConversationID:          conversationID,
-		Progress:                progress,
-		Logger:                  logger,
-		SnapshotMCPIDs:          snapshotMCPIDs,
-		StreamsMainAssistant:    streamsMainAssistant,
-		EinoRoleTag:             einoRoleTag,
+		OrchMode:             orchMode,
+		OrchestratorName:     orchestratorName,
+		ConversationID:       conversationID,
+		Progress:             progress,
+		Logger:               logger,
+		SnapshotMCPIDs:       snapshotMCPIDs,
+		StreamsMainAssistant: streamsMainAssistant,
+		EinoRoleTag:          einoRoleTag,
 		// Chat history recovery is intentionally centralized in last_react_*.
 		// ADK checkpoints are a second persisted model-state channel and make
 		// stale-context bugs hard to reason about across user turns.（上游 baff533：

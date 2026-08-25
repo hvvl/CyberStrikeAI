@@ -207,14 +207,14 @@ func RunEinoSingleChatModelAgent(
 	// 请求级失败通道收集器：与 RunDeepAgent 一致，重试耗尽时按本 run 内最近失败通道归属。
 	runCtx, failedCollector := withFailedChannelCollector(ctx)
 	result, runErr := runEinoADKAgentLoop(runCtx, &einoADKRunLoopArgs{
-		OrchMode:                "eino_single",
-		OrchestratorName:        einoSingleAgentName,
-		ConversationID:          conversationID,
-		Progress:                progress,
-		Logger:                  logger,
-		SnapshotMCPIDs:          snapshotMCPIDs,
-		StreamsMainAssistant:    streamsMainAssistant,
-		EinoRoleTag:             einoRoleTag,
+		OrchMode:             "eino_single",
+		OrchestratorName:     einoSingleAgentName,
+		ConversationID:       conversationID,
+		Progress:             progress,
+		Logger:               logger,
+		SnapshotMCPIDs:       snapshotMCPIDs,
+		StreamsMainAssistant: streamsMainAssistant,
+		EinoRoleTag:          einoRoleTag,
 		// Chat history recovery is intentionally centralized in last_react_*.
 		// ADK checkpoints are a second persisted model-state channel and make
 		// stale-context bugs hard to reason about across user turns.（上游 baff533：

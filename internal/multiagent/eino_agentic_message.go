@@ -178,12 +178,24 @@ func functionToolResultToMessage(result *schema.FunctionToolResult) *schema.Mess
 	}
 }
 
+// cloneAnyMap 拷贝业务自定义 Extra key；跳过 `_eino` 前缀的库内部元数据 key。
+// 背景（内存修复 G，pprof heap 实测）：agenticopenai 给每个流式 chunk 的 Extra 塞
+// _eino_ext_agenticopenai_chat_response_meta_ext 等元数据，本函数对每个 chunk 再做
+// 一次 map 拷贝——cloneAnyMap 一度 834MB/328 万对象为堆 TOP1；而全仓对 `.Extra[`
+// 的业务读取点为零（唯一接触点是 builder 写 cyberstrike_ 前缀的标记，不带 _eino）。
+// 纯库内部 key 的 map 直接返回 nil；业务 key（无此前缀）照常拷贝、行为不变。
 func cloneAnyMap(in map[string]any) map[string]any {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make(map[string]any, len(in))
+	var out map[string]any
 	for k, v := range in {
+		if strings.HasPrefix(k, "_eino") {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]any, len(in))
+		}
 		out[k] = v
 	}
 	return out
