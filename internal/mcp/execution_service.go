@@ -492,7 +492,37 @@ func (s *ExecutionService) takeAbortUserNote(id string) string {
 	return note
 }
 
+// staleExecutionEntryAge 非终态 entry 的最大滞留时长：worker 的 runCtx 与会话取消
+// 刻意解耦（后台执行特性，该设计保留），当 worker 阻塞在不受 ctx 控制的 I/O 时
+// entry 永远 non-terminal。超龄（默认 24h）的僵死 entry 在 cleanup 时发取消信号并
+// 逐出内存（DB 行由 monitor reconcile / 迟到的 finishEntry 收尾；不加 HardTimeout
+// 以免误杀合法长时扫描）。
+const staleExecutionEntryAge = 24 * time.Hour
+
 func (s *ExecutionService) cleanupOldEntriesLocked() {
+	// 先淘汰超龄僵死 entry（非终态且 startTime 超过 staleExecutionEntryAge），
+	// 否则它们永远不被下面的 terminal-only 逻辑清理，无上界累积导致内存泄漏。
+	now := time.Now()
+	for id, entry := range s.entries {
+		if entry == nil || entry.exec == nil {
+			continue
+		}
+		if isExecutionTerminal(entry.exec.Status) {
+			continue
+		}
+		if now.Sub(entry.exec.StartTime) < staleExecutionEntryAge {
+			continue
+		}
+		if entry.cancel != nil {
+			entry.cancel()
+		}
+		s.logger.Warn("evicted stale non-terminal execution entry",
+			zap.String("executionId", id),
+			zap.String("status", entry.exec.Status),
+			zap.Time("startTime", entry.exec.StartTime),
+		)
+		delete(s.entries, id)
+	}
 	if s.maxInMemory <= 0 || len(s.entries) <= s.maxInMemory {
 		return
 	}

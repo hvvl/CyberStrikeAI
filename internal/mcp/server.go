@@ -781,28 +781,12 @@ func (s *Server) GetExecution(id string) (*ToolExecution, bool) {
 	return nil, false
 }
 
-// loadHistoricalData 从数据库加载历史数据
+// loadHistoricalData 从数据库加载历史统计信息。
+// 注意：不再预载历史执行记录——监控读取（GetAllExecutions/GetToolExecution）在有
+// storage 时本就全部走 DB，预载 1000 条含完整输出的记录只构成永不释放的 RSS 基线。
 func (s *Server) loadHistoricalData() {
 	if s.storage == nil {
 		return
-	}
-
-	// 加载历史执行记录（最近1000条）
-	executions, err := s.storage.LoadToolExecutions()
-	if err != nil {
-		s.logger.Warn("加载历史执行记录失败", zap.Error(err))
-	} else {
-		s.mu.Lock()
-		for _, exec := range executions {
-			// 只加载最近 maxExecutionsInMemory 条，避免内存占用过大
-			if len(s.executions) < s.maxExecutionsInMemory {
-				s.executions[exec.ID] = exec
-			} else {
-				break
-			}
-		}
-		s.mu.Unlock()
-		s.logger.Info("加载历史执行记录", zap.Int("count", len(executions)))
 	}
 
 	// 加载历史统计信息

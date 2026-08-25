@@ -29,6 +29,11 @@ server:
   # tls_key_path: /path/to/privkey.pem
   # 方式 B（仅本地/测试）：无证书文件时内存自签（浏览器会提示不受信任；SAN 含 localhost / 127.0.0.1）
   tls_auto_self_sign: true
+  # --- 可选：pprof 诊断监听（排障用，默认不启动）---
+  # 无任何鉴权，务必只绑定回环地址（127.0.0.1），不要暴露到外部网络。
+  # 开启后访问 http://127.0.0.1:6060/debug/pprof/（heap/goroutine/profile 等）。
+  # 不支持热更新，修改后需重启。
+  # pprof_addr: 127.0.0.1:6060
 # 认证配置
 auth:
   session_duration_hours: 12 # 登录有效期（小时），超时后需重新登录

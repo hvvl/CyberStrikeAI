@@ -804,6 +804,9 @@ type ServerConfig struct {
 	TLSAutoSelfSign bool `yaml:"tls_auto_self_sign,omitempty" json:"tls_auto_self_sign,omitempty"`
 	// TLSHTTPRedirect 为 false 时禁用 HTTP→HTTPS 跳转；省略或为 true 且已启用 HTTPS 时，明文 HTTP 访问将 308 跳转到 HTTPS（同端口嗅探分流）。
 	TLSHTTPRedirect *bool `yaml:"tls_http_redirect,omitempty" json:"tls_http_redirect,omitempty"`
+	// PprofAddr 诊断 pprof 监听地址（如 127.0.0.1:6060）；空 = 不启动。
+	// 无鉴权，务必仅绑定回环地址；不支持热更新，修改后需重启。
+	PprofAddr string `yaml:"pprof_addr,omitempty" json:"pprof_addr,omitempty"`
 }
 
 type LogConfig struct {
