@@ -110,7 +110,7 @@ function initRouter() {
         const hashParts = hash.split('?');
         let pageId = hashParts[0];
         if (pageId === 'c2') pageId = 'c2-listeners';
-        if (pageId && ['dashboard', 'chat', 'hitl', 'asset-overview', 'asset-library', 'info-collect', 'projects', 'vulnerabilities', 'webshell', 'chat-files', 'mcp-monitor', 'mcp-management', 'knowledge-management', 'knowledge-retrieval-logs', 'roles-management', 'platform-rbac', 'workflows', 'skills-monitor', 'skills-management', 'agents-management', 'settings', 'tasks', 'c2-listeners', 'c2-sessions', 'c2-tasks', 'c2-payloads', 'c2-events', 'c2-profiles'].includes(pageId)) {
+        if (pageId && ['dashboard', 'chat', 'hitl', 'projects', 'vulnerabilities', 'webshell', 'chat-files', 'mcp-monitor', 'mcp-management', 'knowledge-management', 'knowledge-retrieval-logs', 'roles-management', 'platform-rbac', 'workflows', 'skills-monitor', 'skills-management', 'agents-management', 'settings', 'tasks', 'c2-listeners', 'c2-sessions', 'c2-tasks', 'c2-payloads', 'c2-events', 'c2-profiles'].includes(pageId)) {
             switchPage(pageId);
             if (pageId === 'chat') {
                 scheduleChatConversationFromHash(0);
@@ -186,15 +186,7 @@ function updateNavState(pageId) {
     });
     
     // 设置活动状态
-    if (pageId === 'asset-overview' || pageId === 'asset-library' || pageId === 'info-collect') {
-        const assetItem = document.querySelector('.nav-item[data-page="assets"]');
-        if (assetItem) {
-            assetItem.classList.add('active');
-            assetItem.classList.add('expanded');
-        }
-        const submenuItem = document.querySelector(`.nav-submenu-item[data-page="${pageId}"]`);
-        if (submenuItem) submenuItem.classList.add('active');
-    } else if (pageId === 'mcp-monitor' || pageId === 'mcp-management') {
+    if (pageId === 'mcp-monitor' || pageId === 'mcp-management') {
         // MCP子菜单项
         const mcpItem = document.querySelector('.nav-item[data-page="mcp"]');
         if (mcpItem) {
@@ -609,7 +601,7 @@ document.addEventListener('DOMContentLoaded', function() {
         let pageId = hashParts[0];
         
         if (pageId === 'c2') pageId = 'c2-listeners';
-        if (pageId && ['dashboard', 'chat', 'hitl', 'asset-overview', 'asset-library', 'info-collect', 'projects', 'tasks', 'workflows', 'vulnerabilities', 'webshell', 'chat-files', 'mcp-monitor', 'mcp-management', 'knowledge-management', 'knowledge-retrieval-logs', 'roles-management', 'platform-rbac', 'skills-monitor', 'skills-management', 'agents-management', 'settings', 'c2-listeners', 'c2-sessions', 'c2-tasks', 'c2-payloads', 'c2-events', 'c2-profiles'].includes(pageId)) {
+        if (pageId && ['dashboard', 'chat', 'hitl', 'projects', 'tasks', 'workflows', 'vulnerabilities', 'webshell', 'chat-files', 'mcp-monitor', 'mcp-management', 'knowledge-management', 'knowledge-retrieval-logs', 'roles-management', 'platform-rbac', 'skills-monitor', 'skills-management', 'agents-management', 'settings', 'c2-listeners', 'c2-sessions', 'c2-tasks', 'c2-payloads', 'c2-events', 'c2-profiles'].includes(pageId)) {
             switchPage(pageId);
             if (pageId === 'chat') {
                 scheduleChatConversationFromHash(0);

@@ -2,12 +2,8 @@ package database
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"go.uber.org/zap"
 )
 
 func TestParseDBTime_projectFactFormats(t *testing.T) {
@@ -20,51 +16,6 @@ func TestParseDBTime_projectFactFormats(t *testing.T) {
 		got := parseDBTime(s)
 		if got.IsZero() {
 			t.Fatalf("parseDBTime(%q) returned zero", s)
-		}
-	}
-}
-
-func TestListProjectFacts_updatedAtJSON(t *testing.T) {
-	root, err := os.Getwd()
-	if err != nil {
-		t.Skip(err)
-	}
-	dbPath := filepath.Join(root, "..", "..", "data", "conversations.db")
-	if _, err := os.Stat(dbPath); err != nil {
-		t.Skip("conversations.db not found")
-	}
-	db, err := NewDB(dbPath, zap.NewNop())
-	if err != nil {
-		t.Fatal(err)
-	}
-	projects, err := db.ListProjects("", "", 1, 0)
-	if err != nil || len(projects) == 0 {
-		t.Skip("no projects")
-	}
-	pid := projects[0].ID
-
-	list, err := db.ListProjectFacts(pid, ProjectFactListFilter{}, 5, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) == 0 {
-		t.Skip("no facts")
-	}
-	for _, f := range list {
-		if f.UpdatedAt.IsZero() {
-			t.Fatalf("fact %s UpdatedAt is zero after ListProjectFacts", f.FactKey)
-		}
-		b, err := json.Marshal(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var m map[string]interface{}
-		if err := json.Unmarshal(b, &m); err != nil {
-			t.Fatal(err)
-		}
-		raw, ok := m["updated_at"].(string)
-		if !ok || raw == "" || raw[:4] == "0001" {
-			t.Fatalf("bad updated_at in JSON: %v", m["updated_at"])
 		}
 	}
 }

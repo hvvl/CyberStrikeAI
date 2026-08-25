@@ -135,12 +135,6 @@ func (h *AgentHandler) prepareMultiAgentSession(req *ChatRequest, c *gin.Context
 			builtin.ToolRecordVulnerability,
 			builtin.ToolListVulnerabilities,
 			builtin.ToolGetVulnerability,
-			builtin.ToolUpsertProjectFact,
-			builtin.ToolGetProjectFact,
-			builtin.ToolListProjectFacts,
-			builtin.ToolSearchProjectFacts,
-			builtin.ToolDeprecateProjectFact,
-			builtin.ToolRestoreProjectFact,
 			builtin.ToolListKnowledgeRiskTypes,
 			builtin.ToolSearchKnowledgeBase,
 		}

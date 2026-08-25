@@ -110,10 +110,6 @@
         cancelMCPToolExecution: 'monitor:write',
 
         // FOFA / 信息收集
-        submitFofaSearch: 'fofa:execute',
-        scanFofaRow: 'fofa:execute',
-        batchScanSelectedFofaRows: 'fofa:execute',
-        exportFofaResults: 'fofa:execute',
         importSelectedFofaAssets: 'asset:write',
         importFofaRowAsset: 'asset:write',
         openAssetImport: 'asset:write',

@@ -7,15 +7,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// agentSessionContextBlock 注入会话工作目录与项目黑板（用于 system prompt 追加块）。
+// agentSessionContextBlock 注入会话工作目录与项目测试范围（用于 system prompt 追加块）。
 // 用户输入由 message history 承载；压缩后由 summarization 摘要指令保留关键约束。
 func (h *AgentHandler) agentSessionContextBlock(conversationID string) string {
 	var parts []string
 	if ws := h.buildWorkspaceBlock(conversationID); ws != "" {
 		parts = append(parts, ws)
 	}
-	if bb := h.projectBlackboardBlock(conversationID); bb != "" {
-		parts = append(parts, bb)
+	if sb := h.projectScopeBlock(conversationID); sb != "" {
+		parts = append(parts, sb)
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -44,8 +44,8 @@ func (h *AgentHandler) buildWorkspaceBlock(conversationID string) string {
 	return project.BuildWorkspaceBlock(abs)
 }
 
-// projectBlackboardBlock 根据对话 ID 构建项目事实索引块（用于注入 system prompt）。
-func (h *AgentHandler) projectBlackboardBlock(conversationID string) string {
+// projectScopeBlock 根据对话 ID 构建项目测试范围块（用于注入 system prompt；黑板机制已移除）。
+func (h *AgentHandler) projectScopeBlock(conversationID string) string {
 	if h == nil || h.db == nil || h.config == nil {
 		return ""
 	}
@@ -60,9 +60,9 @@ func (h *AgentHandler) projectBlackboardBlock(conversationID string) string {
 	if err != nil || projectID == "" {
 		return ""
 	}
-	block, err := project.BuildProjectBlackboardBlock(h.db, projectID, h.config.Project)
+	block, err := project.BuildProjectScopeContextBlock(h.db, projectID)
 	if err != nil {
-		h.logger.Warn("构建项目黑板索引失败", zap.String("conversationId", conversationID), zap.Error(err))
+		h.logger.Warn("构建项目测试范围块失败", zap.String("conversationId", conversationID), zap.Error(err))
 		return ""
 	}
 	return strings.TrimSpace(block)

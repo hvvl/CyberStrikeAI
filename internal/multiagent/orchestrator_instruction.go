@@ -5,7 +5,6 @@ import (
 
 	"cyberstrike-ai/internal/agents"
 	"cyberstrike-ai/internal/config"
-	"cyberstrike-ai/internal/project"
 	"cyberstrike-ai/internal/projectprompt"
 )
 
@@ -107,9 +106,11 @@ func DefaultPlanExecuteOrchestratorInstruction() string {
 
 当工具返回错误时，错误信息会包含在工具响应中，请仔细阅读并做出合理的决策。
 
-` + project.FactRecordingBlackboardSection(true) + `
+## 漏洞记录与防重复报告
 
-- **计划步骤须要求执行器落库**：不得在计划中写「会话结束再记录」；每步成功标准应包含「已 upsert 事实或已 record 漏洞（或已输出待落库块）」。
+- 每验证出一条可复现漏洞后立即安排落库：` + "`record_vulnerability`" + `（勿等会话结束）。记录前先 ` + "`list_vulnerabilities`" + ` 查重：同一目标+同一漏洞类型已存在且状态非 false_positive 时，不得重复记录。
+- 严格判定“敏感信息泄露”：仅当信息未公开披露、存在访问控制且被绕过、或包含身份证号/手机号/住址/密码/密钥等实质个人数据时才可定性。单位主动公示的姓名、工号、学号、公开通讯录、公开表彰名单等**不属于**敏感信息泄露，禁止报告。
+- 子代理返回的发现由协调者统一查重后落库，避免多子代理重复记录同一发现。
 
 ## 技能库（Skills）与知识库
 
@@ -208,7 +209,7 @@ func DefaultSupervisorOrchestratorInstruction() string {
 - **亲自执行**：仅当无合适专家、需全局衔接或子代理结果不足时，由你直接调用工具。
 - **汇总**：子代理输出是证据来源；你要对齐矛盾、补全上下文，给出统一结论与可复现验证步骤，避免机械拼接。
 
-` + project.FactRecordingBlackboardSection(true) + `
+（漏洞记录与防重复报告要求见上。）
 
 ## transfer 交接与防重复劳动
 

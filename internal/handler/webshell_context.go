@@ -15,7 +15,7 @@ const WebshellSkillHintMultiAgent = "Skills 包请使用 Eino 多代理内置 `s
 
 // webshellAssistantToolList AI 助手在 WebShell 上下文下允许使用的工具清单（展示给模型用）。
 // 注意：此处只是展示字符串，真正的权限限制是在调用方设置的 roleTools 切片里。
-const webshellAssistantToolList = "webshell_exec、webshell_file_list、webshell_file_read、webshell_file_write、record_vulnerability、list_vulnerabilities、get_vulnerability、upsert_project_fact、get_project_fact、list_project_facts、search_project_facts、deprecate_project_fact、restore_project_fact、list_knowledge_risk_types、search_knowledge_base"
+const webshellAssistantToolList = "webshell_exec、webshell_file_list、webshell_file_read、webshell_file_write、record_vulnerability、list_vulnerabilities、get_vulnerability、list_knowledge_risk_types、search_knowledge_base"
 
 // BuildWebshellAssistantContext 根据连接信息与用户原始消息组装 AI 助手的上下文提示词。
 // 上下文包含：连接 ID、备注、目标系统（及对应命令集建议）、响应编码、可用工具清单、Skills 加载入口、
@@ -65,7 +65,7 @@ func BuildWebshellAssistantContext(conn *database.WebShellConnection, skillHint,
 	b.WriteString(conn.ID)
 	b.WriteString("\"）：")
 	b.WriteString(webshellAssistantToolList)
-	b.WriteString("。边渗透边记录：每确认新认知即 upsert_project_fact，每验证漏洞即 record_vulnerability，勿等会话结束。")
+	b.WriteString("。漏洞即时落库：每验证出可复现漏洞即 record_vulnerability（先 list_vulnerabilities 查重，勿重复报告），勿等会话结束。")
 	b.WriteString(skillHint)
 	b.WriteString("\n\n用户请求：")
 	b.WriteString(userMsg)

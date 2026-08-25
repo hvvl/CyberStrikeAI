@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"cyberstrike-ai/internal/config"
 	"cyberstrike-ai/internal/database"
 )
 
@@ -74,8 +73,8 @@ func truncateRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
-// BuildProjectBlackboardBlock 组合测试范围 + 事实黑板索引。
-func BuildProjectBlackboardBlock(db *database.DB, projectID string, cfg config.ProjectConfig) (string, error) {
+// BuildProjectScopeContextBlock 返回项目测试范围块（黑板机制已移除，仅保留 scope 注入）。
+func BuildProjectScopeContextBlock(db *database.DB, projectID string) (string, error) {
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
 		return "", nil
@@ -84,16 +83,5 @@ func BuildProjectBlackboardBlock(db *database.DB, projectID string, cfg config.P
 	if err != nil {
 		return "", err
 	}
-	parts := []string{}
-	if scope := strings.TrimSpace(BuildScopeBlock(proj)); scope != "" {
-		parts = append(parts, scope)
-	}
-	index, err := BuildFactIndexBlock(db, projectID, cfg)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(index) != "" {
-		parts = append(parts, index)
-	}
-	return strings.Join(parts, "\n\n"), nil
+	return strings.TrimSpace(BuildScopeBlock(proj)), nil
 }

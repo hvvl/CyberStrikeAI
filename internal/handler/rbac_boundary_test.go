@@ -51,30 +51,6 @@ func TestDetachedAgentContextRetainsPrincipalWithoutParentCancellation(t *testin
 	}
 }
 
-func TestPromoteAttackChainRequiresSourceConversationAccess(t *testing.T) {
-	db, err := database.NewDB(filepath.Join(t.TempDir(), "promote-rbac.db"), zap.NewNop())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	project, _ := db.CreateProject(&database.Project{Name: "owned"})
-	conversation, _ := db.CreateConversation("foreign", database.ConversationCreateMeta{})
-	_ = db.SetResourceOwner("project", project.ID, "u1")
-	_ = db.SetResourceOwner("conversation", conversation.ID, "u2")
-	h := NewProjectHandler(db, zap.NewNop())
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set(security.ContextSessionKey, security.Session{UserID: "u1", Scope: database.RBACScopeOwn})
-		c.Next()
-	})
-	router.POST("/api/projects/:id/promote-attack-chain/:conversationId", h.PromoteAttackChain)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/projects/"+project.ID+"/promote-attack-chain/"+conversation.ID, nil))
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403: %s", w.Code, w.Body.String())
-	}
-}
-
 func TestVulnerabilityCannotBeReparentedToForeignProject(t *testing.T) {
 	db, err := database.NewDB(filepath.Join(t.TempDir(), "vuln-reparent-rbac.db"), zap.NewNop())
 	if err != nil {

@@ -6,8 +6,6 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"cyberstrike-ai/internal/project"
-
 	"github.com/bytedance/sonic"
 )
 
@@ -82,15 +80,7 @@ func formatSummarizationModelContext(msgs []adk.Message) string {
 func sanitizeSystemContentForTranscript(content string) string {
 	content = stripToolNamesIndexFromSystem(content)
 	content = stripSkillsSystemBoilerplate(content)
-	blackboard := extractProjectBlackboardSection(content)
-
-	var sb strings.Builder
-	sb.WriteString(transcriptStaticSystemOmitNote)
-	if bb := strings.TrimSpace(blackboard); bb != "" {
-		sb.WriteString("\n\n")
-		sb.WriteString(bb)
-	}
-	return sb.String()
+	return transcriptStaticSystemOmitNote
 }
 
 func stripToolNamesIndexFromSystem(s string) string {
@@ -120,20 +110,6 @@ func indexFirstSubstring(s string, markers ...string) int {
 		}
 	}
 	return first
-}
-
-func extractProjectBlackboardSection(s string) string {
-	start := strings.Index(s, project.FactIndexSectionStartMarker)
-	if start < 0 {
-		return ""
-	}
-	section := s[start:]
-	end := strings.Index(section, project.FactIndexSectionEndMarker)
-	if end < 0 {
-		return ""
-	}
-	section = section[:end+len(project.FactIndexSectionEndMarker)]
-	return strings.TrimSpace(section)
 }
 
 func appendTranscriptSection(sb *strings.Builder, role schema.RoleType, body string) {

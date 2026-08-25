@@ -27,7 +27,6 @@ var rbacAssignableResourceTables = map[string]string{
 	"project":       "projects",
 	"conversation":  "conversations",
 	"vulnerability": "vulnerabilities",
-	"asset":         "assets",
 	"webshell":      "webshell_connections",
 	"batch_task":    "batch_task_queues",
 	"c2_listener":   "c2_listeners",
@@ -529,9 +528,6 @@ func (db *DB) UserCanAccessResource(userID, scope, resourceType, resourceID stri
 	if resourceType == "vulnerability" {
 		return db.userCanAccessVulnerabilityViaParent(userID, scope, resourceID)
 	}
-	if resourceType == "asset" {
-		return db.userCanAccessAssetViaParent(userID, scope, resourceID)
-	}
 	if resourceType == "conversation" {
 		return db.userCanAccessConversationViaParent(userID, scope, resourceID)
 	}
@@ -539,15 +535,6 @@ func (db *DB) UserCanAccessResource(userID, scope, resourceType, resourceID stri
 		return db.userCanAccessC2ViaParent(userID, scope, resourceType, resourceID)
 	}
 	return false
-}
-
-func (db *DB) userCanAccessAssetViaParent(userID, scope, assetID string) bool {
-	var projectID sql.NullString
-	if err := db.QueryRow(`SELECT project_id FROM assets WHERE id = ?`, assetID).Scan(&projectID); err != nil {
-		return false
-	}
-	return projectID.Valid && strings.TrimSpace(projectID.String) != "" &&
-		db.UserCanAccessResource(userID, scope, "project", strings.TrimSpace(projectID.String))
 }
 
 func (db *DB) userCanAccessConversationViaParent(userID, scope, conversationID string) bool {
@@ -636,8 +623,6 @@ func (db *DB) userOwnsResource(userID, resourceType, resourceID string) bool {
 		table = "conversations"
 	case "vulnerability":
 		table = "vulnerabilities"
-	case "asset":
-		table = "assets"
 	case "webshell":
 		table = "webshell_connections"
 	case "batch_task":
@@ -665,8 +650,6 @@ func (db *DB) SetResourceOwner(resourceType, resourceID, userID string) error {
 		table = "conversations"
 	case "vulnerability":
 		table = "vulnerabilities"
-	case "asset":
-		table = "assets"
 	case "webshell":
 		table = "webshell_connections"
 	case "batch_task":
@@ -689,8 +672,6 @@ func (db *DB) GetResourceOwner(resourceType, resourceID string) string {
 		table = "conversations"
 	case "vulnerability":
 		table = "vulnerabilities"
-	case "asset":
-		table = "assets"
 	case "webshell":
 		table = "webshell_connections"
 	case "batch_task":
@@ -752,10 +733,6 @@ func (db *DB) ListAssignableRBACResourcesPage(resourceType, search string, limit
 		query = `SELECT id, title, severity FROM vulnerabilities
 			WHERE LOWER(title) LIKE ? ESCAPE '\' OR LOWER(id) LIKE ? ESCAPE '\'
 			ORDER BY updated_at DESC LIMIT ? OFFSET ?`
-	case "asset":
-		query = `SELECT id, COALESCE(NULLIF(host,''),NULLIF(domain,''),NULLIF(ip,''),id), protocol || CASE WHEN port>0 THEN ':' || port ELSE '' END FROM assets
-			WHERE LOWER(host) LIKE ? ESCAPE '\' OR LOWER(domain) LIKE ? ESCAPE '\' OR LOWER(ip) LIKE ? ESCAPE '\'
-			ORDER BY updated_at DESC LIMIT ? OFFSET ?`
 	case "webshell":
 		query = `SELECT id, COALESCE(NULLIF(remark, ''), url), type FROM webshell_connections
 			WHERE LOWER(COALESCE(NULLIF(remark, ''), url)) LIKE ? ESCAPE '\' OR LOWER(id) LIKE ? ESCAPE '\'
@@ -771,9 +748,6 @@ func (db *DB) ListAssignableRBACResourcesPage(resourceType, search string, limit
 	}
 
 	queryArgs := []interface{}{pattern, pattern}
-	if resourceType == "asset" {
-		queryArgs = append(queryArgs, pattern)
-	}
 	queryArgs = append(queryArgs, limit, offset)
 	rows, err := db.Query(query, queryArgs...)
 	if err != nil {
@@ -809,8 +783,6 @@ func (db *DB) CountAssignableRBACResources(resourceType, search string) (int, er
 		query = `SELECT COUNT(*) FROM conversations WHERE LOWER(COALESCE(NULLIF(TRIM(title), ''), id)) LIKE ? ESCAPE '\' OR LOWER(id) LIKE ? ESCAPE '\'`
 	case "vulnerability":
 		query = `SELECT COUNT(*) FROM vulnerabilities WHERE LOWER(title) LIKE ? ESCAPE '\' OR LOWER(id) LIKE ? ESCAPE '\'`
-	case "asset":
-		query = `SELECT COUNT(*) FROM assets WHERE LOWER(host) LIKE ? ESCAPE '\' OR LOWER(domain) LIKE ? ESCAPE '\' OR LOWER(ip) LIKE ? ESCAPE '\'`
 	case "webshell":
 		query = `SELECT COUNT(*) FROM webshell_connections WHERE LOWER(COALESCE(NULLIF(remark, ''), url)) LIKE ? ESCAPE '\' OR LOWER(id) LIKE ? ESCAPE '\'`
 	case "batch_task":
@@ -820,9 +792,6 @@ func (db *DB) CountAssignableRBACResources(resourceType, search string) (int, er
 	}
 	var total int
 	queryArgs := []interface{}{pattern, pattern}
-	if resourceType == "asset" {
-		queryArgs = append(queryArgs, pattern)
-	}
 	if err := db.QueryRow(query, queryArgs...).Scan(&total); err != nil {
 		return 0, err
 	}
@@ -903,8 +872,6 @@ func (db *DB) lookupRBACResourceOptionsByIDs(resourceType string, ids []string) 
 		query = `SELECT id, COALESCE(NULLIF(TRIM(title), ''), '未命名对话'), COALESCE(project_id, '') FROM conversations WHERE id IN (` + placeholders + `)`
 	case "vulnerability":
 		query = `SELECT id, title, severity FROM vulnerabilities WHERE id IN (` + placeholders + `)`
-	case "asset":
-		query = `SELECT id, COALESCE(NULLIF(host,''),NULLIF(domain,''),NULLIF(ip,''),id), protocol || CASE WHEN port>0 THEN ':' || port ELSE '' END FROM assets WHERE id IN (` + placeholders + `)`
 	case "webshell":
 		query = `SELECT id, COALESCE(NULLIF(remark, ''), url), type FROM webshell_connections WHERE id IN (` + placeholders + `)`
 	case "batch_task":
@@ -1074,8 +1041,6 @@ func (db *DB) AssignResourcesToUserAuto(userID string, resourceIDs []string) (in
 
 	typeTablePairs := []struct{ resourceType, table string }{
 		{"project", "projects"}, {"conversation", "conversations"},
-		{"vulnerability", "vulnerabilities"}, {"webshell", "webshell_connections"},
-		{"asset", "assets"},
 		{"batch_task", "batch_task_queues"}, {"c2_listener", "c2_listeners"},
 	}
 	detected := make(map[string]string, len(uniqueIDs))

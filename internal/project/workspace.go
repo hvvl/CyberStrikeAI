@@ -7,6 +7,19 @@ import (
 	"strings"
 )
 
+// AppendSystemPromptBlock 将附加块追加到 system prompt。
+func AppendSystemPromptBlock(base, block string) string {
+	base = strings.TrimSpace(base)
+	block = strings.TrimSpace(block)
+	if block == "" {
+		return base
+	}
+	if base == "" {
+		return block
+	}
+	return base + "\n\n" + block
+}
+
 func sanitizeWorkspacePathSegment(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {

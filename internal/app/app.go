@@ -163,8 +163,6 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 
 	// 注册漏洞记录工具
 	registerVulnerabilityTools(mcpServer, db, log.Logger)
-	registerAssetTools(mcpServer, db, log.Logger)
-	registerProjectFactTools(mcpServer, db, cfg, log.Logger)
 	registerVisionTools(mcpServer, cfg, log.Logger)
 
 	// 创建外部MCP管理器（使用与内部MCP服务器相同的存储）
@@ -396,7 +394,6 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	authHandler.SetAudit(auditSvc)
 	attackChainHandler := handler.NewAttackChainHandler(db, &cfg.OpenAI, log.Logger)
 	vulnerabilityHandler := handler.NewVulnerabilityHandler(db, log.Logger)
-	assetHandler := handler.NewAssetHandler(db, log.Logger)
 	projectHandler := handler.NewProjectHandler(db, log.Logger)
 	rbacHandler := handler.NewRBACHandler(db, log.Logger)
 	rbacHandler.SetAudit(auditSvc)
@@ -423,7 +420,6 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	roleHandler.SetAudit(auditSvc)
 	skillsHandler := handler.NewSkillsHandler(cfg, configPath, log.Logger)
 	skillsHandler.SetAudit(auditSvc)
-	fofaHandler := handler.NewFofaHandler(cfg, log.Logger)
 	terminalHandler := handler.NewTerminalHandler(log.Logger)
 	if db != nil {
 		skillsHandler.SetDB(db) // 设置数据库连接以便获取调用统计
@@ -483,8 +479,6 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	// 设置漏洞工具注册器（内置工具，必须设置）
 	vulnerabilityRegistrar := func() error {
 		registerVulnerabilityTools(mcpServer, db, log.Logger)
-		registerAssetTools(mcpServer, db, log.Logger)
-		registerProjectFactTools(mcpServer, db, cfg, log.Logger)
 		registerVisionTools(mcpServer, cfg, log.Logger)
 		return nil
 	}
@@ -573,7 +567,6 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 		attackChainHandler,
 		app, // 传递 App 实例以便动态获取 knowledgeHandler
 		vulnerabilityHandler,
-		assetHandler,
 		projectHandler,
 		workflowHandler,
 		webshellHandler,
@@ -581,7 +574,6 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 		roleHandler,
 		skillsHandler,
 		markdownAgentsHandler,
-		fofaHandler,
 		terminalHandler,
 		app.c2Handler,
 		auditHandler,
@@ -880,7 +872,6 @@ func setupRoutes(
 	attackChainHandler *handler.AttackChainHandler,
 	app *App, // 传递 App 实例以便动态获取 knowledgeHandler
 	vulnerabilityHandler *handler.VulnerabilityHandler,
-	assetHandler *handler.AssetHandler,
 	projectHandler *handler.ProjectHandler,
 	workflowHandler *handler.WorkflowHandler,
 	webshellHandler *handler.WebShellHandler,
@@ -888,7 +879,6 @@ func setupRoutes(
 	roleHandler *handler.RoleHandler,
 	skillsHandler *handler.SkillsHandler,
 	markdownAgentsHandler *handler.MarkdownAgentsHandler,
-	fofaHandler *handler.FofaHandler,
 	terminalHandler *handler.TerminalHandler,
 	c2Handler *handler.C2Handler,
 	auditHandler *handler.AuditHandler,
@@ -999,24 +989,6 @@ func setupRoutes(
 		protected.POST("/multi-agent/markdown-agents", markdownAgentsHandler.CreateMarkdownAgent)
 		protected.PUT("/multi-agent/markdown-agents/:filename", markdownAgentsHandler.UpdateMarkdownAgent)
 		protected.DELETE("/multi-agent/markdown-agents/:filename", markdownAgentsHandler.DeleteMarkdownAgent)
-
-		// 信息收集 - FOFA 查询（后端代理）
-		protected.POST("/fofa/search", fofaHandler.Search)
-		// 信息收集 - 自然语言解析为 FOFA 语法（需人工确认后再查询）
-		protected.POST("/fofa/parse", fofaHandler.ParseNaturalLanguage)
-
-		// 资产管理
-		protected.GET("/assets", assetHandler.List)
-		protected.GET("/assets/selection", assetHandler.Selection)
-		protected.GET("/assets/stats", assetHandler.Stats)
-		protected.POST("/assets/import", assetHandler.Import)
-		protected.POST("/assets/scan-links", assetHandler.RecordScans)
-		protected.PUT("/assets/bulk", assetHandler.BulkUpdate)
-		protected.PUT("/assets/project-binding", assetHandler.UpdateProjectBinding)
-		protected.POST("/assets/batch-delete", assetHandler.BatchDelete)
-		protected.POST("/assets/merge", security.RequirePermission("asset:write"), assetHandler.Merge)
-		protected.PUT("/assets/:id", assetHandler.Update)
-		protected.DELETE("/assets/:id", assetHandler.Delete)
 
 		// 批量任务管理
 		protected.POST("/batch-tasks", agentHandler.CreateBatchQueue)
@@ -1273,7 +1245,7 @@ func setupRoutes(
 		protected.PUT("/vulnerabilities/:id", vulnerabilityHandler.UpdateVulnerability)
 		protected.DELETE("/vulnerabilities/:id", vulnerabilityHandler.DeleteVulnerability)
 
-		// 项目管理与事实黑板
+		// 项目管理
 		protected.GET("/projects/dashboard-summary", projectHandler.GetDashboardSummary)
 		protected.GET("/projects", projectHandler.ListProjects)
 		protected.POST("/projects", projectHandler.CreateProject)
@@ -1282,17 +1254,6 @@ func setupRoutes(
 		protected.GET("/projects/:id", projectHandler.GetProject)
 		protected.PUT("/projects/:id", projectHandler.UpdateProject)
 		protected.DELETE("/projects/:id", projectHandler.DeleteProject)
-		protected.GET("/projects/:id/fact-graph", projectHandler.GetFactGraph)
-		protected.GET("/projects/:id/fact-edges", projectHandler.ListFactEdges)
-		protected.POST("/projects/:id/fact-edges", projectHandler.CreateFactEdge)
-		protected.DELETE("/projects/:id/fact-edges/:edgeId", projectHandler.DeleteFactEdge)
-		protected.POST("/projects/:id/promote-attack-chain/:conversationId", projectHandler.PromoteAttackChain)
-		protected.GET("/projects/:id/facts", projectHandler.ListFacts)
-		protected.POST("/projects/:id/facts", projectHandler.CreateFact)
-		protected.PUT("/projects/:id/facts/:factId", projectHandler.UpdateFact)
-		protected.DELETE("/projects/:id/facts/:factId", projectHandler.DeleteFact)
-		protected.POST("/projects/:id/facts/deprecate", projectHandler.DeprecateFact)
-		protected.POST("/projects/:id/facts/restore", projectHandler.RestoreFact)
 
 		// WebShell 管理（代理执行 + 连接配置存 SQLite）
 		protected.GET("/webshell/connections", webshellHandler.ListConnections)

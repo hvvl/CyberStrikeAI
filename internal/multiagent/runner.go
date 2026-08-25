@@ -457,15 +457,7 @@ func RunDeepAgent(
 
 	// noNestedTaskMiddleware 必须在最外层（最先拦截），防止 skill 或其他中间件内部触发 task 调用绕过检测。
 	deepHandlers := []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{newNoNestedAgenticTaskMiddleware()}
-	var taskBlackboardSupplement string
-	if appCfg.Project.Enabled && db != nil {
-		if pid := strings.TrimSpace(projectID); pid != "" {
-			if block, err := project.BuildFactIndexBlock(db, pid, appCfg.Project); err == nil {
-				taskBlackboardSupplement = strings.TrimSpace(block)
-			}
-		}
-	}
-	if mw := newAgenticTaskContextEnrichMiddleware(runtimeUserMessage, history, ma.SubAgentUserContextMaxRunesEffective(), taskBlackboardSupplement); mw != nil {
+	if mw := newAgenticTaskContextEnrichMiddleware(runtimeUserMessage, history, ma.SubAgentUserContextMaxRunesEffective(), ""); mw != nil {
 		deepHandlers = append(deepHandlers, mw)
 	}
 	if len(mainAgenticOrchestratorPre) > 0 {

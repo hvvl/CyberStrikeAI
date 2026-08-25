@@ -74,12 +74,12 @@ func TestAgent_NewAgent_CustomConfig(t *testing.T) {
 
 func TestBuildToolFailureMessageAuthorizationDenied(t *testing.T) {
 	msg := buildToolFailureMessage(
-		"list_project_facts",
+		"list_vulnerabilities",
 		"tool authorization denied: no access to project",
 		errors.New("tool authorization denied: no access to project"),
 	)
 	for _, want := range []string{
-		"工具名称: list_project_facts",
+		"工具名称: list_vulnerabilities",
 		"错误详情: tool authorization denied: no access to project",
 	} {
 		if !strings.Contains(msg, want) {
@@ -90,7 +90,7 @@ func TestBuildToolFailureMessageAuthorizationDenied(t *testing.T) {
 		"可能的原因",
 		"建议",
 		"错误类型",
-		"工具 \"list_project_facts\" 不存在或未启用",
+		"工具 \"list_vulnerabilities\" 不存在或未启用",
 		"单次执行超时",
 	} {
 		if strings.Contains(msg, notWant) {

@@ -3,31 +3,13 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-var factKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
-
-// ValidateFactKey 校验事实 key（项目内唯一标识）。
-func ValidateFactKey(key string) error {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return fmt.Errorf("fact_key 不能为空")
-	}
-	if len(key) > 128 {
-		return fmt.Errorf("fact_key 过长（最多 128 字符）")
-	}
-	if !factKeyPattern.MatchString(key) {
-		return fmt.Errorf("fact_key 格式无效，仅允许字母、数字及 . _ / -，且须以字母或数字开头（支持驼峰命名）")
-	}
-	return nil
-}
-
-// Project 渗透测试项目（跨对话共享黑板）。
+// Project 渗透测试项目（scope 授权边界注入与会话分组）。
 type Project struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
@@ -37,32 +19,6 @@ type Project struct {
 	Pinned      bool      `json:"pinned"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-// ProjectFact 项目事实（黑板条目）。
-type ProjectFact struct {
-	ID                     string    `json:"id"`
-	ProjectID              string    `json:"project_id"`
-	FactKey                string    `json:"fact_key"`
-	Category               string    `json:"category"`
-	Summary                string    `json:"summary"`
-	Body                   string    `json:"body"`
-	Confidence             string    `json:"confidence"` // confirmed | tentative | deprecated
-	SourceConversationID   string    `json:"source_conversation_id,omitempty"`
-	SourceMessageID        string    `json:"source_message_id,omitempty"`
-	Pinned                 bool      `json:"pinned"`
-	RelatedVulnerabilityID string    `json:"related_vulnerability_id,omitempty"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
-}
-
-// ProjectFactListFilter 事实列表筛选。
-type ProjectFactListFilter struct {
-	Category               string
-	Confidence             string
-	Search                 string
-	RelatedVulnerabilityID string
-	ExcludeDeprecated      bool // 为 true 时排除 confidence=deprecated
 }
 
 // CreateProject 创建项目。
@@ -276,13 +232,10 @@ func (db *DB) UpdateProject(p *Project) error {
 	return nil
 }
 
-// DeleteProject 删除项目（级联删除事实；对话 project_id 置空由 FK 处理；其他资源 project_id 置空）。
+// DeleteProject 删除项目（对话 project_id 置空由 FK 处理；其他资源 project_id 置空）。
 func (db *DB) DeleteProject(id string) error {
 	if _, err := db.Exec(`UPDATE vulnerabilities SET project_id = NULL WHERE project_id = ?`, id); err != nil {
 		return fmt.Errorf("解除漏洞项目关联失败: %w", err)
-	}
-	if _, err := db.Exec(`UPDATE assets SET project_id = NULL WHERE project_id = ?`, id); err != nil {
-		return fmt.Errorf("解除资产项目关联失败: %w", err)
 	}
 	if _, err := db.Exec(`UPDATE webshell_connections SET project_id = NULL WHERE project_id = ?`, id); err != nil {
 		return fmt.Errorf("解除 WebShell 项目关联失败: %w", err)
@@ -333,265 +286,6 @@ func (db *DB) SetConversationProjectID(conversationID, projectID string) error {
 		return fmt.Errorf("设置对话项目失败: %w", err)
 	}
 	return nil
-}
-
-// ListProjectFactsForIndex 列出用于黑板索引注入的事实（不含 deprecated，除非 includeDeprecated）。
-func (db *DB) ListProjectFactsForIndex(projectID string, includeDeprecated bool) ([]*ProjectFact, error) {
-	query := `SELECT id, project_id, fact_key, category, summary, COALESCE(body,''), confidence,
-		COALESCE(source_conversation_id,''), COALESCE(source_message_id,''), pinned,
-		COALESCE(related_vulnerability_id,''), created_at, updated_at
-		FROM project_facts WHERE project_id = ?`
-	args := []interface{}{projectID}
-	if !includeDeprecated {
-		query += " AND confidence != 'deprecated'"
-	}
-	query += " ORDER BY pinned DESC, updated_at DESC"
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanProjectFacts(rows)
-}
-
-// ListProjectFacts 分页列出项目事实。
-func (db *DB) ListProjectFacts(projectID string, filter ProjectFactListFilter, limit, offset int) ([]*ProjectFact, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-	query := `SELECT id, project_id, fact_key, category, summary, COALESCE(body,''), confidence,
-		COALESCE(source_conversation_id,''), COALESCE(source_message_id,''), pinned,
-		COALESCE(related_vulnerability_id,''), created_at, updated_at
-		FROM project_facts WHERE project_id = ?`
-	args := []interface{}{projectID}
-	if c := strings.TrimSpace(filter.Category); c != "" {
-		query += " AND category = ?"
-		args = append(args, c)
-	}
-	if c := strings.TrimSpace(filter.Confidence); c != "" {
-		query += " AND confidence = ?"
-		args = append(args, c)
-	}
-	if filter.ExcludeDeprecated {
-		query += " AND confidence != 'deprecated'"
-	}
-	if rid := strings.TrimSpace(filter.RelatedVulnerabilityID); rid != "" {
-		query += " AND related_vulnerability_id = ?"
-		args = append(args, rid)
-	}
-	if s := strings.TrimSpace(filter.Search); s != "" {
-		pat := "%" + s + "%"
-		query += " AND (fact_key LIKE ? OR summary LIKE ? OR body LIKE ?)"
-		args = append(args, pat, pat, pat)
-	}
-	query += " ORDER BY pinned DESC, updated_at DESC LIMIT ? OFFSET ?"
-	args = append(args, limit, offset)
-
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanProjectFacts(rows)
-}
-
-// GetProjectFactByKey 按 key 获取事实。
-func (db *DB) GetProjectFactByKey(projectID, factKey string) (*ProjectFact, error) {
-	row := db.QueryRow(
-		`SELECT id, project_id, fact_key, category, summary, COALESCE(body,''), confidence,
-			COALESCE(source_conversation_id,''), COALESCE(source_message_id,''), pinned,
-			COALESCE(related_vulnerability_id,''), created_at, updated_at
-		 FROM project_facts WHERE project_id = ? AND fact_key = ?`,
-		projectID, factKey,
-	)
-	return scanProjectFactRow(row)
-}
-
-// GetProjectFact 按 ID 获取事实。
-func (db *DB) GetProjectFact(id string) (*ProjectFact, error) {
-	row := db.QueryRow(
-		`SELECT id, project_id, fact_key, category, summary, COALESCE(body,''), confidence,
-			COALESCE(source_conversation_id,''), COALESCE(source_message_id,''), pinned,
-			COALESCE(related_vulnerability_id,''), created_at, updated_at
-		 FROM project_facts WHERE id = ?`, id,
-	)
-	return scanProjectFactRow(row)
-}
-
-// mergeFactBodyOnUpdate 更新时若 incoming body 为空则保留已有内容，避免仅改 summary 时丢失攻击链。
-func mergeFactBodyOnUpdate(incoming, existing string) string {
-	if strings.TrimSpace(incoming) == "" {
-		return existing
-	}
-	return incoming
-}
-
-// UpsertProjectFact 创建或更新事实（按 project_id + fact_key）。
-func (db *DB) UpsertProjectFact(f *ProjectFact) (*ProjectFact, error) {
-	if err := ValidateFactKey(f.FactKey); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(f.Category) == "" {
-		f.Category = "note"
-	}
-	if strings.TrimSpace(f.Confidence) == "" {
-		f.Confidence = "tentative"
-	}
-	now := time.Now()
-
-	existing, err := db.GetProjectFactByKey(f.ProjectID, f.FactKey)
-	if err == nil && existing != nil {
-		f.ID = existing.ID
-		f.CreatedAt = existing.CreatedAt
-		f.UpdatedAt = now
-		f.Body = mergeFactBodyOnUpdate(f.Body, existing.Body)
-		if strings.TrimSpace(f.Category) == "" {
-			f.Category = existing.Category
-		}
-		if strings.TrimSpace(f.Confidence) == "" {
-			f.Confidence = existing.Confidence
-		}
-		_, err = db.Exec(
-			`UPDATE project_facts SET category = ?, summary = ?, body = ?, confidence = ?,
-				source_conversation_id = COALESCE(?, source_conversation_id),
-				source_message_id = COALESCE(?, source_message_id),
-				pinned = ?, related_vulnerability_id = ?, updated_at = ?
-			 WHERE id = ?`,
-			f.Category, f.Summary, f.Body, f.Confidence,
-			nullIfEmpty(f.SourceConversationID), nullIfEmpty(f.SourceMessageID), boolToInt(f.Pinned),
-			nullIfEmpty(f.RelatedVulnerabilityID), f.UpdatedAt, f.ID,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("更新事实失败: %w", err)
-		}
-		return f, nil
-	}
-
-	if f.ID == "" {
-		f.ID = uuid.New().String()
-	}
-	f.CreatedAt = now
-	f.UpdatedAt = now
-	_, err = db.Exec(
-		`INSERT INTO project_facts (
-			id, project_id, fact_key, category, summary, body, confidence,
-			source_conversation_id, source_message_id, pinned, related_vulnerability_id,
-			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		f.ID, f.ProjectID, f.FactKey, f.Category, f.Summary, f.Body, f.Confidence,
-		nullIfEmpty(f.SourceConversationID), nullIfEmpty(f.SourceMessageID), boolToInt(f.Pinned),
-		nullIfEmpty(f.RelatedVulnerabilityID),
-		f.CreatedAt, f.UpdatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("创建事实失败: %w", err)
-	}
-	return f, nil
-}
-
-// DeprecateProjectFact 将事实标记为 deprecated（关联边同步 deprecated）。
-func (db *DB) DeprecateProjectFact(projectID, factKey string) error {
-	res, err := db.Exec(
-		`UPDATE project_facts SET confidence = 'deprecated', updated_at = ? WHERE project_id = ? AND fact_key = ?`,
-		time.Now(), projectID, factKey,
-	)
-	if err != nil {
-		return err
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("事实不存在")
-	}
-	return db.DeprecateProjectFactEdgesForKey(projectID, factKey)
-}
-
-// RestoreProjectFact 将已废弃事实恢复为 tentative 或 confirmed（重新参与黑板索引）。
-func (db *DB) RestoreProjectFact(projectID, factKey, confidence string) error {
-	confidence = strings.TrimSpace(strings.ToLower(confidence))
-	if confidence == "" {
-		confidence = "tentative"
-	}
-	if confidence != "confirmed" && confidence != "tentative" {
-		return fmt.Errorf("confidence 须为 confirmed 或 tentative")
-	}
-
-	existing, err := db.GetProjectFactByKey(projectID, factKey)
-	if err != nil {
-		return fmt.Errorf("事实不存在")
-	}
-	if strings.ToLower(strings.TrimSpace(existing.Confidence)) != "deprecated" {
-		return fmt.Errorf("事实未处于废弃状态")
-	}
-
-	_, err = db.Exec(
-		`UPDATE project_facts SET confidence = ?, updated_at = ? WHERE project_id = ? AND fact_key = ?`,
-		confidence, time.Now(), projectID, factKey,
-	)
-	return err
-}
-
-// DeleteProjectFact 删除事实（级联删除相关边）。
-func (db *DB) DeleteProjectFact(id string) error {
-	f, err := db.GetProjectFact(id)
-	if err != nil {
-		return err
-	}
-	if err := db.DeleteProjectFactEdgesForKey(f.ProjectID, f.FactKey); err != nil {
-		return err
-	}
-	_, err = db.Exec(`DELETE FROM project_facts WHERE id = ?`, id)
-	return err
-}
-
-func scanProjectFacts(rows *sql.Rows) ([]*ProjectFact, error) {
-	var out []*ProjectFact
-	for rows.Next() {
-		f, err := scanProjectFactFromRows(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, f)
-	}
-	return out, rows.Err()
-}
-
-func scanProjectFactRow(row *sql.Row) (*ProjectFact, error) {
-	var f ProjectFact
-	var pinned int
-	var createdAt, updatedAt string
-	err := row.Scan(
-		&f.ID, &f.ProjectID, &f.FactKey, &f.Category, &f.Summary, &f.Body, &f.Confidence,
-		&f.SourceConversationID, &f.SourceMessageID, &pinned,
-		&f.RelatedVulnerabilityID, &createdAt, &updatedAt,
-	)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("事实不存在")
-		}
-		return nil, err
-	}
-	f.Pinned = pinned != 0
-	f.CreatedAt = parseDBTime(createdAt)
-	f.UpdatedAt = parseDBTime(updatedAt)
-	return &f, nil
-}
-
-func scanProjectFactFromRows(rows *sql.Rows) (*ProjectFact, error) {
-	var f ProjectFact
-	var pinned int
-	var createdAt, updatedAt string
-	err := rows.Scan(
-		&f.ID, &f.ProjectID, &f.FactKey, &f.Category, &f.Summary, &f.Body, &f.Confidence,
-		&f.SourceConversationID, &f.SourceMessageID, &pinned,
-		&f.RelatedVulnerabilityID, &createdAt, &updatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	f.Pinned = pinned != 0
-	f.CreatedAt = parseDBTime(createdAt)
-	f.UpdatedAt = parseDBTime(updatedAt)
-	return &f, nil
 }
 
 func boolToInt(b bool) int {

@@ -23,8 +23,6 @@ var HitlExemptMetaTools = []string{
 	"TaskGet",
 	"TaskUpdate",
 	"TaskList",
-	"upsert_project_fact",
-	"get_project_fact",
 }
 
 // IsToolSearchTool reports whether name is the Eino dynamictool tool_search meta-tool.

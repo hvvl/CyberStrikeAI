@@ -11,7 +11,6 @@ import (
 	"cyberstrike-ai/internal/config"
 	"cyberstrike-ai/internal/database"
 	copenai "cyberstrike-ai/internal/openai"
-	"cyberstrike-ai/internal/project"
 
 	"github.com/bytedance/sonic"
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
@@ -272,9 +271,6 @@ func newEinoSummarizationMiddleware(
 				return nil, ferr
 			}
 			out = mergeMessageIntoLeadingSystem(out, userLedger)
-			if appCfg != nil {
-				out = refreshFactIndexInMessages(out, db, projectID, appCfg.Project, logger)
-			}
 			return out, nil
 		},
 		Callback: func(ctx context.Context, before, after adk.ChatModelAgentState) error {
@@ -441,50 +437,6 @@ func buildPlaintextSummarizationInput(
 	}
 	input = append(input, userInstruction)
 	return input
-}
-
-// refreshFactIndexInMessages 在 summarization 压缩后，用 DB 最新索引替换 system 中已有的项目黑板索引段。
-func refreshFactIndexInMessages(msgs []adk.Message, db *database.DB, projectID string, cfg config.ProjectConfig, logger *zap.Logger) []adk.Message {
-	if db == nil || !cfg.Enabled {
-		return msgs
-	}
-	projectID = strings.TrimSpace(projectID)
-	if projectID == "" {
-		return msgs
-	}
-	freshIndex, err := project.BuildFactIndexBlock(db, projectID, cfg)
-	if err != nil {
-		if logger != nil {
-			logger.Warn("summarization: 刷新项目黑板索引失败", zap.String("projectId", projectID), zap.Error(err))
-		}
-		return msgs
-	}
-	freshIndex = strings.TrimSpace(freshIndex)
-	if freshIndex == "" {
-		return msgs
-	}
-
-	changed := false
-	out := make([]adk.Message, len(msgs))
-	for i, msg := range msgs {
-		if msg == nil || msg.Role != schema.System {
-			out[i] = msg
-			continue
-		}
-		newContent, ok := project.ReplaceFactIndexSection(msg.Content, freshIndex)
-		if !ok {
-			out[i] = msg
-			continue
-		}
-		cloned := *msg
-		cloned.Content = newContent
-		out[i] = &cloned
-		changed = true
-	}
-	if changed && logger != nil {
-		logger.Info("summarization: 已刷新项目黑板索引", zap.String("projectId", projectID))
-	}
-	return out
 }
 
 // summarizeFinalizeWithRecentAssistantToolTrail 在摘要消息后保留最近 assistant/tool 轨迹，避免压缩后执行链断裂。

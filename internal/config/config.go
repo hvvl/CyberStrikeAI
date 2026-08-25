@@ -23,10 +23,6 @@ type Config struct {
 	MCP         MCPConfig             `yaml:"mcp"`
 	AI          AIConfig              `yaml:"ai,omitempty" json:"ai,omitempty"`
 	OpenAI      OpenAIConfig          `yaml:"openai,omitempty" json:"openai,omitempty"`
-	FOFA        FofaConfig            `yaml:"fofa,omitempty" json:"fofa,omitempty"`
-	ZoomEye     SpaceSearchConfig     `yaml:"zoomeye,omitempty" json:"zoomeye,omitempty"`
-	Quake       SpaceSearchConfig     `yaml:"quake,omitempty" json:"quake,omitempty"`
-	Shodan      SpaceSearchConfig     `yaml:"shodan,omitempty" json:"shodan,omitempty"`
 	Agent       AgentConfig           `yaml:"agent"`
 	Hitl        HitlConfig            `yaml:"hitl,omitempty" json:"hitl,omitempty"`
 	Security    SecurityConfig        `yaml:"security"`
@@ -62,38 +58,10 @@ const (
 	DefaultSummarizationOutputReserveTokens           = 8192
 )
 
-// ProjectConfig 项目黑板（跨对话共享事实）配置。
+// ProjectConfig 项目配置（黑板机制已移除，仅保留项目启用开关与默认项目）。
 type ProjectConfig struct {
-	Enabled                 bool   `yaml:"enabled" json:"enabled"`
-	DefaultProjectID        string `yaml:"default_project_id,omitempty" json:"default_project_id,omitempty"` // 机器人/批量等无显式项目时绑定的默认项目
-	FactIndexMaxRunes       int    `yaml:"fact_index_max_runes,omitempty" json:"fact_index_max_runes,omitempty"`
-	FactIndexPathMaxRunes   int    `yaml:"fact_index_path_max_runes,omitempty" json:"fact_index_path_max_runes,omitempty"`
-	FactSummaryMaxRunes     int    `yaml:"fact_summary_max_runes,omitempty" json:"fact_summary_max_runes,omitempty"`
-	DefaultInjectDeprecated bool   `yaml:"default_inject_deprecated,omitempty" json:"default_inject_deprecated,omitempty"`
-}
-
-// FactIndexMaxRunesEffective 自动注入黑板索引的最大 rune 数。
-func (c ProjectConfig) FactIndexMaxRunesEffective() int {
-	if c.FactIndexMaxRunes <= 0 {
-		return 3500
-	}
-	return c.FactIndexMaxRunes
-}
-
-// FactIndexPathMaxRunesEffective 攻击路径速览段的最大 rune 数（从 fact_index_max_runes 预算中预留）。
-func (c ProjectConfig) FactIndexPathMaxRunesEffective() int {
-	if c.FactIndexPathMaxRunes <= 0 {
-		return 1000
-	}
-	return c.FactIndexPathMaxRunes
-}
-
-// FactSummaryMaxRunesEffective upsert 时 summary 最大 rune 数（索引一行，宜含验证要点）。
-func (c ProjectConfig) FactSummaryMaxRunesEffective() int {
-	if c.FactSummaryMaxRunes <= 0 {
-		return 200
-	}
-	return c.FactSummaryMaxRunes
+	Enabled          bool   `yaml:"enabled" json:"enabled"`
+	DefaultProjectID string `yaml:"default_project_id,omitempty" json:"default_project_id,omitempty"` // 机器人/批量等无显式项目时绑定的默认项目
 }
 
 // MultiAgentConfig 基于 CloudWeGo Eino adk/prebuilt 的多代理编排（deep | plan_execute | supervisor）。
@@ -1053,17 +1021,6 @@ func (c OpenAIReasoningConfig) AllowClientReasoningEffective() bool {
 		return true
 	}
 	return *c.AllowClientReasoning
-}
-
-type FofaConfig struct {
-	// APIKey 为 FOFA API Key（建议使用只读权限的 Key）
-	APIKey  string `yaml:"api_key,omitempty" json:"api_key,omitempty"`
-	BaseURL string `yaml:"base_url,omitempty" json:"base_url,omitempty"` // 默认 https://fofa.info/api/v1/search/all
-}
-
-type SpaceSearchConfig struct {
-	APIKey  string `yaml:"api_key,omitempty" json:"api_key,omitempty"`
-	BaseURL string `yaml:"base_url,omitempty" json:"base_url,omitempty"`
 }
 
 type SecurityConfig struct {

@@ -8,13 +8,10 @@ import (
 	"testing"
 
 	"cyberstrike-ai/internal/config"
-	"cyberstrike-ai/internal/database"
-	"cyberstrike-ai/internal/project"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
 	"github.com/cloudwego/eino/schema"
-	"go.uber.org/zap"
 )
 
 // fixedTokenCounter 让 tool 消息按 tokensPerToolMessage 计，其它消息按 1 计。
@@ -457,11 +454,6 @@ func TestSanitizeSystemContentForTranscript_BestPractice(t *testing.T) {
 		"你是CyberStrikeAI，是一个专业的网络安全渗透测试专家。",
 		"高强度扫描要求：全力出击",
 		"",
-		project.FactIndexSectionStartMarker,
-		"## 项目黑板索引（project: 123, id: abc）",
-		"（暂无事实）",
-		"需要写入请使用 upsert_project_fact。",
-		project.FactIndexSectionEndMarker,
 		"",
 		transcriptSkillsSystemMarker,
 		"**如何使用 Skill（技能）（渐进式展示）：**",
@@ -481,15 +473,12 @@ func TestSanitizeSystemContentForTranscript_BestPractice(t *testing.T) {
 	if !strings.Contains(out, transcriptStaticSystemOmitNote) {
 		t.Fatalf("missing omission note: %q", out)
 	}
-	if !strings.Contains(out, "## 项目黑板索引（project: 123, id: abc）") {
-		t.Fatalf("project blackboard should be kept: %q", out)
-	}
 }
 
 func TestFormatSummarizationTranscript_OmitsBloatedSystem(t *testing.T) {
 	t.Parallel()
 	msgs := []adk.Message{
-		schema.SystemMessage("以下是当前会话绑定的工具名称索引\n- nmap\n\n你是CyberStrikeAI\n" + project.FactIndexSectionStartMarker + "\n## 项目黑板索引（project: p1, id: x）\n（暂无事实）\n" + project.FactIndexSectionEndMarker + "\n" + transcriptSkillsSystemMarker + "\nboiler"),
+		schema.SystemMessage("以下是当前会话绑定的工具名称索引\n- nmap\n\n你是CyberStrikeAI\n\n(legacy blackboard content)\n" + transcriptSkillsSystemMarker + "\nboiler"),
 		schema.UserMessage("hello"),
 		schema.AssistantMessage("reply", nil),
 	}
@@ -499,57 +488,6 @@ func TestFormatSummarizationTranscript_OmitsBloatedSystem(t *testing.T) {
 	}
 	if !strings.Contains(out, "hello") || !strings.Contains(out, "reply") {
 		t.Fatalf("conversation turns missing: %q", out)
-	}
-	if !strings.Contains(out, "## 项目黑板索引（project: p1, id: x）") {
-		t.Fatalf("dynamic blackboard missing: %q", out)
-	}
-}
-
-func TestRefreshFactIndexInMessages(t *testing.T) {
-	t.Parallel()
-	dbPath := filepath.Join(t.TempDir(), "summarize-facts.db")
-	db, err := database.NewDB(dbPath, zap.NewNop())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	proj, err := db.CreateProject(&database.Project{Name: "summarize-proj"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := config.ProjectConfig{Enabled: true}
-	oldIndex, err := project.BuildFactIndexBlock(db, proj.ID, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = db.UpsertProjectFact(&database.ProjectFact{
-		ProjectID: proj.ID,
-		FactKey:   "target/host",
-		Category:  "target",
-		Summary:   "fresh host fact",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	msgs := []adk.Message{
-		schema.SystemMessage("instruction\n\n" + oldIndex),
-		schema.UserMessage("hi"),
-	}
-
-	out := refreshFactIndexInMessages(msgs, db, proj.ID, cfg, nil)
-	sys := out[0].Content
-	if strings.Contains(sys, "（暂无事实）") {
-		t.Fatalf("expected refreshed index, got: %q", sys)
-	}
-	if !strings.Contains(sys, "fresh host fact") {
-		t.Fatalf("expected new fact in index: %q", sys)
-	}
-	if !strings.Contains(sys, "instruction") {
-		t.Fatalf("non-index system content should be preserved: %q", sys)
 	}
 }
 

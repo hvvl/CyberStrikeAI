@@ -131,23 +131,6 @@ vision:
   skip_preprocess_below_bytes: 2097152 # 低于 2MB 且长边<=max_dimension 且<=max_payload 时原图直传；0=始终压缩
   detail: auto # low | high | auto（Eino ImageURLDetail）
   timeout_seconds: 60
-# ============================================
-# 资产管理（网络空间测绘搜索）配置（可选）
-# ============================================
-# 用于「资产管理 → 信息收集」页面调用 FOFA / ZoomEye / Quake / Shodan API
-# 后端代理请求，避免前端暴露 key；环境变量优先级更高
-fofa:
-  base_url: https://fofa.info/api/v1/search/all # 可选，留空则使用默认
-  api_key: "" # FOFA API Key（可选，建议在系统设置中填写）
-zoomeye:
-  base_url: https://api.zoomeye.ai/v2/search # 可选，留空则使用默认
-  api_key: "" # ZoomEye API Key；也可通过 ZOOMEYE_API_KEY 环境变量配置
-quake:
-  base_url: https://quake.360.net/api/v3/search/quake_service # 可选，留空则使用默认
-  api_key: "" # Quake API Token；也可通过 QUAKE_API_KEY 环境变量配置
-shodan:
-  base_url: https://api.shodan.io # 可选，留空则使用默认
-  api_key: "" # Shodan API Key；也可通过 SHODAN_API_KEY 环境变量配置
 # Agent 配置
 # 达到最大迭代次数时，AI 会自动总结测试结果
 agent:
@@ -563,8 +546,4 @@ roles_dir: roles # 角色配置文件目录（相对于配置文件所在目录�
 project:
   enabled: true
   # default_project_id: "" # 可选：机器人/批量任务创建对话时的默认项目 ID
-  fact_index_max_runes: 65000
-  # 事实关系速览段预算（从索引总预算中预留）
-  fact_index_path_max_runes: 10000
-  fact_summary_max_runes: 24000
-  default_inject_deprecated: false
+  # 项目黑板/事实机制已移除；项目仅保留「测试范围 scope 注入 + 会话分组」职责

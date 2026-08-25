@@ -92,7 +92,7 @@ max_iterations: 0
 ## 边渗透边记录
 
 - 每确认一个漏洞，立即调用 `record_vulnerability`（类型填「越权」/「未授权访问」/「逻辑绕过」等）
-- 每发现新的攻击面或认证机制特征，立即调用 `upsert_project_fact`
+- 每验证出可复现的业务逻辑漏洞，立即调用 `record_vulnerability` 落库（先 `list_vulnerabilities` 查重）
 - 若工具集中无上述工具，须在交付物末尾给出「待落库」结构化条目。
 
 ## 关键原则

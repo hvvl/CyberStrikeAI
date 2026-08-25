@@ -6,22 +6,7 @@ let projectsCacheAll = [];
 const PROJECTS_LIST_PAGE_SIZE_KEY = 'cyberstrike.projects_list_page_size';
 let currentProjectId = null;
 let currentProjectUpdatedAt = null;
-let currentProjectTab = 'facts';
-let currentProjectAssets = [];
-const PROJECT_ASSETS_PAGE_SIZE_KEY = 'cyberstrike.project_assets_page_size';
-let projectAssetsPagination = {
-    page: 1,
-    pageSize: (() => {
-        try {
-            const size = Number(localStorage.getItem(PROJECT_ASSETS_PAGE_SIZE_KEY));
-            return [10, 20, 50, 100].includes(size) ? size : 20;
-        } catch (e) {
-            return 20;
-        }
-    })(),
-    total: 0,
-    totalPages: 1,
-};
+let currentProjectTab = 'conversations';
 const projectNameById = {};
 let _projectsListReady = false;
 let _projectsFetchPromise = null;
@@ -67,9 +52,6 @@ async function notifyProjectApiFailure(response, fallbackKey, fallbackText) {
 }
 
 const PROJECTS_FILTER_SELECT_HANDLERS = {
-    'project-facts-filter-category': function () { loadProjectFacts(); },
-    'project-facts-filter-confidence': function () { loadProjectFacts(); },
-    'project-graph-view': function () { loadProjectFactGraph(); },
     'project-vulns-filter-severity': function () { loadProjectVulnerabilities(); },
     'project-vulns-filter-status': function () { loadProjectVulnerabilities(); },
     'projects-page-size-pagination': function () { changeProjectsPageSize(); }
@@ -243,130 +225,13 @@ function refreshProjectsFilterSelects() {
     }
 }
 
-/** 与后端 internal/project/fact_template.go 对齐 */
-const FACT_ATTACK_CHAIN_BODY_TEMPLATE = `## 结论（可验证，一句话）
-<勿仅写「存在漏洞」；写明类型 + 位置 + 触发条件>
-
-## 目标与入口
-- 目标: <URL / IP:Port / 主机名>
-- 入口: <路径 / 接口 / 参数>
-- 前置条件: <匿名 / 角色 / Cookie / 其他依赖>
-
-## 攻击链（逐步可复现）
-1. <侦察/发现>
-2. <利用/触发>
-3. <影响证明（读文件、RCE 回显、越权数据等）>
-
-## Exploit / POC
-### 请求
-\`\`\`http
-<METHOD> <path> HTTP/1.1
-Host: ...
-...
-
-<body>
-\`\`\`
-
-### 响应 / 现象
-<关键响应片段、状态码、差异点>
-
-### 命令 / 脚本（如有）
-\`\`\`bash
-<command>
-\`\`\`
-
-## 关键证据
-- <工具输出摘要 / 截图路径 / 会话或消息 ID>
-
-## 关联
-- related_vulnerability_id: <可选>
-- 依赖事实: <fact_key，如 auth/session_cookie>
-  - 结构化关系边（自动同步；links 文本格式 type: source_fact_key）:
-  - discovered_on: target/primary_domain
-
-## 备注与不确定性
-<待验证假设、环境差异、绕过尝试记录>`;
-
-const FACT_ENV_BODY_TEMPLATE = `## 摘要
-<该事实的核心认知>
-
-## 细节
-<端口/版本/路径/凭据特征/业务规则等>
-
-## 来源与证据
-<命令输出、响应片段、发现时间>
-
-## 关联
-- 相关 fact_key: <可选>`;
-
 const FACT_ATTACK_CHAIN_PREFIXES = ['finding/', 'chain/', 'exploit/', 'poc/'];
 const FACT_ATTACK_CHAIN_CATEGORIES = new Set(['finding', 'chain', 'exploit', 'poc', 'vuln']);
 
-function requiresAttackChainFact(category, factKey) {
-    const c = (category || '').trim().toLowerCase();
-    if (FACT_ATTACK_CHAIN_CATEGORIES.has(c)) return true;
-    const key = (factKey || '').trim().toLowerCase();
-    return FACT_ATTACK_CHAIN_PREFIXES.some((p) => key.startsWith(p));
-}
 
-function isSparseFactBody(category, factKey, body) {
-    if (!requiresAttackChainFact(category, factKey)) return false;
-    const text = (body || '').trim();
-    if (!text) return true;
-    const lower = text.toLowerCase();
-    const hasSteps =
-        lower.includes('攻击链') ||
-        lower.includes('## 攻击') ||
-        lower.includes('## exploit') ||
-        lower.includes('## poc');
-    const hasHTTP =
-        lower.includes('```http') ||
-        lower.includes('```bash') ||
-        lower.includes('curl ') ||
-        lower.includes('get ') ||
-        lower.includes('post ');
-    const hasReq = lower.includes('请求') || lower.includes('响应') || lower.includes('payload');
-    return !(hasSteps || hasHTTP || hasReq);
-}
 
-function formatFactBodyBadge(f) {
-    if (!requiresAttackChainFact(f.category, f.fact_key)) {
-        const hasBody = !!(f.body || '').trim();
-        return `<span class="projects-fact-badge projects-fact-badge--na" title="${escapeHtml(tp('projects.factBodyEnvTitle'))}">${hasBody ? escapeHtml(tp('projects.factBodyHasDetail')) : '—'}</span>`;
-    }
-    if (isSparseFactBody(f.category, f.fact_key, f.body)) {
-        return `<span class="projects-fact-badge projects-fact-badge--warn" title="${escapeHtml(tp('projects.factBodySparseTitle'))}">${escapeHtml(tp('projects.factBodySparse'))}</span>`;
-    }
-    return `<span class="projects-fact-badge projects-fact-badge--ok" title="${escapeHtml(tp('projects.factBodyReproducibleTitle'))}">${escapeHtml(tp('projects.factBodyReproducible'))}</span>`;
-}
 
-function updateFactFormHints() {
-    const cat = document.getElementById('fact-modal-category')?.value || '';
-    const key = document.getElementById('fact-modal-key')?.value || '';
-    const body = document.getElementById('fact-modal-body')?.value || '';
-    const hint = document.getElementById('fact-modal-body-hint');
-    if (!hint) return;
-    if (requiresAttackChainFact(cat, key)) {
-        const sparse = isSparseFactBody(cat, key, body);
-        hint.textContent = sparse
-            ? tp('projects.factHintAttackSparse')
-            : tp('projects.factHintAttackReady');
-        hint.classList.toggle('projects-field-hint--warn', sparse);
-    } else {
-        hint.textContent = tp('projects.factHintEnv');
-        hint.classList.remove('projects-field-hint--warn');
-    }
-}
 
-function insertFactBodyTemplate(kind) {
-    const ta = document.getElementById('fact-modal-body');
-    if (!ta) return;
-    const tpl = kind === 'env' ? FACT_ENV_BODY_TEMPLATE : FACT_ATTACK_CHAIN_BODY_TEMPLATE;
-    if (ta.value.trim() && !confirm(tp('projects.confirmOverwriteBodyTemplate'))) return;
-    ta.value = tpl;
-    updateFactFormHints();
-    ta.focus();
-}
 
 function getActiveProjectId() {
     try {
@@ -612,12 +477,9 @@ function getProjectName(id) {
 
 function initProjectsModalEscape() {
     if (window._projectsModalEscapeBound) return;
-    window._projectsModalEscapeBound = true;
-    document.addEventListener('keydown', (e) => {
+        document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
         if (isProjectsOverlayVisible('project-modal')) closeProjectModal();
-        else if (isProjectsOverlayVisible('fact-modal')) closeFactModal();
-        else if (isProjectsOverlayVisible('fact-detail-modal')) closeFactDetailModal();
     });
 }
 
@@ -688,19 +550,6 @@ function updateProjectsListCount() {
     if (el) el.textContent = String(projectsListPagination.total || projectsCache.length);
 }
 
-/** 事实分类 → 徽章样式（与 fact_template.go 常量对齐） */
-const FACT_CATEGORY_BADGE = {
-    target: 'projects-category--target',
-    auth: 'projects-category--auth',
-    infra: 'projects-category--infra',
-    business: 'projects-category--business',
-    finding: 'projects-category--finding',
-    chain: 'projects-category--chain',
-    exploit: 'projects-category--exploit',
-    poc: 'projects-category--poc',
-    note: 'projects-category--note',
-    vuln: 'projects-category--exploit',
-};
 
 function formatCategoryBadge(category) {
     const raw = (category || '').trim();
@@ -725,18 +574,6 @@ function formatConfidenceBadge(confidence) {
     return `<span class="projects-confidence ${cls}">${escapeHtml(label)}</span>`;
 }
 
-function renderProjectFactActions(keyEsc, idEsc, confidence) {
-    const isDeprecated = (confidence || '').toLowerCase() === 'deprecated';
-    const toggleBtn = isDeprecated
-        ? `<button type="button" class="projects-action-btn projects-action-btn--restore" data-fact-key="${keyEsc}" onclick="restoreProjectFactByKey(this.dataset.factKey)" title="${escapeHtml(tp('projects.restoreTitle'))}">${escapeHtml(tp('projects.restore'))}</button>`
-        : `<button type="button" class="projects-action-btn projects-action-btn--mute" data-fact-key="${keyEsc}" onclick="deprecateProjectFactByKey(this.dataset.factKey)" title="${escapeHtml(tp('projects.deprecateTitle'))}">${escapeHtml(tp('projects.deprecate'))}</button>`;
-    return `<div class="projects-table-actions">
-        <button type="button" class="projects-action-btn projects-action-btn--edit" data-fact-key="${keyEsc}" onclick="showEditFactModal(this.dataset.factKey)" title="${escapeHtml(tp('projects.editTitle'))}">${escapeHtml(tp('common.edit'))}</button>
-        <button type="button" class="projects-action-btn projects-action-btn--view" data-fact-key="${keyEsc}" onclick="viewProjectFactBody(this.dataset.factKey)" title="${escapeHtml(tp('projects.viewBodyTitle'))}">${escapeHtml(tp('projects.details'))}</button>
-        ${toggleBtn}
-        <button type="button" class="projects-action-btn projects-action-btn--danger" data-fact-id="${idEsc}" onclick="deleteProjectFact(this.dataset.factId)" title="${escapeHtml(tp('projects.deleteForeverTitle'))}">${escapeHtml(tp('common.delete'))}</button>
-    </div>`;
-}
 
 function formatSeverityBadge(severity) {
     const s = (severity || 'info').toLowerCase();
@@ -970,42 +807,20 @@ function refreshProjectDetailMetaI18n() {
 
 function updateProjectStats(stats) {
     const s = stats || {};
-    const f = document.getElementById('project-stat-facts');
     const v = document.getElementById('project-stat-vulns');
     const c = document.getElementById('project-stat-conversations');
-    const sparse = document.getElementById('project-stat-sparse');
-    const fc = s.fact_count ?? s.factCount ?? 0;
     const vc = s.vuln_count ?? s.vulnCount ?? 0;
     const cc = s.conversation_count ?? s.conversationCount ?? 0;
-    const sc = s.sparse_fact_count ?? s.sparseFactCount ?? 0;
-    if (f) f.textContent = tpFmt('projects.statsFacts', `${fc} facts`, { count: fc });
     if (v) v.textContent = tpFmt('projects.statsVulns', `${vc} vulnerabilities`, { count: vc });
     if (c) c.textContent = tpFmt('projects.statsConversations', `${cc} conversations`, { count: cc });
-    if (sparse) {
-        if (sc > 0) {
-            sparse.hidden = false;
-            sparse.textContent = tpFmt('projects.statsSparse', `${sc} to complete`, { count: sc });
-        } else {
-            sparse.hidden = true;
-        }
-    }
 }
 
 async function selectProject(id) {
     currentProjectId = id;
     if (id) setActiveProjectId(id);
-    projectAssetsPagination.page = 1;
-    const searchEl = document.getElementById('project-facts-search');
-    const catEl = document.getElementById('project-facts-filter-category');
-    const confEl = document.getElementById('project-facts-filter-confidence');
-    const sparseEl = document.getElementById('project-facts-filter-sparse');
     const vulnSearchEl = document.getElementById('project-vulns-search');
     const vulnSevEl = document.getElementById('project-vulns-filter-severity');
     const vulnStatusEl = document.getElementById('project-vulns-filter-status');
-    if (searchEl) searchEl.value = '';
-    if (catEl) catEl.value = '';
-    if (confEl) confEl.value = '';
-    if (sparseEl) sparseEl.checked = false;
     if (vulnSearchEl) vulnSearchEl.value = '';
     if (vulnSevEl) vulnSevEl.value = '';
     if (vulnStatusEl) vulnStatusEl.value = '';
@@ -1038,509 +853,44 @@ async function selectProject(id) {
 }
 
 function switchProjectTab(tab) {
-    if (tab === 'assets' && typeof hasPermission === 'function' && !hasPermission('asset:read')) tab = 'facts';
     currentProjectTab = tab;
-    ['facts', 'graph', 'assets', 'conversations', 'vulns', 'settings'].forEach((t) => {
+    ['conversations', 'vulns', 'settings'].forEach((t) => {
         const btn = document.getElementById(`project-tab-${t}`);
         const panel = document.getElementById(`project-panel-${t}`);
         if (btn) btn.classList.toggle('is-active', t === tab);
         if (panel) panel.hidden = t !== tab;
     });
-    if (tab === 'facts') loadProjectFacts();
-    if (tab === 'graph') loadProjectFactGraph();
-    if (tab === 'assets') loadProjectAssets();
     if (tab === 'conversations') loadProjectConversations();
     if (tab === 'vulns') loadProjectVulnerabilities();
 }
 
-async function loadProjectAssets(page) {
-    const tbody = document.getElementById('project-assets-tbody');
-    const countEl = document.getElementById('project-assets-count');
-    if (!tbody || !currentProjectId) return;
-    const requestedPage = Math.max(1, Number(page || projectAssetsPagination.page || 1));
-    projectAssetsPagination.page = requestedPage;
-    tbody.innerHTML = `<tr class="is-empty-row"><td colspan="7">${escapeHtml(tpFmt('common.loading', '加载中...'))}</td></tr>`;
-    const qs = new URLSearchParams({
-        project_id: currentProjectId,
-        page: String(requestedPage),
-        page_size: String(projectAssetsPagination.pageSize),
-    });
-    const res = await apiFetch(`/api/assets?${qs.toString()}`);
-    if (!res.ok) {
-        currentProjectAssets = [];
-        projectAssetsPagination.total = 0;
-        projectAssetsPagination.totalPages = 1;
-        if (countEl) countEl.textContent = '0';
-        tbody.innerHTML = `<tr class="is-empty-row"><td colspan="7">${escapeHtml(tpFmt('common.loadFailed', '加载失败'))}</td></tr>`;
-        renderProjectAssetsPagination();
-        return;
-    }
-    const data = await res.json();
-    currentProjectAssets = data.assets || [];
-    projectAssetsPagination.page = Number(data.page || requestedPage);
-    projectAssetsPagination.total = Number(data.total || 0);
-    projectAssetsPagination.totalPages = Math.max(1, Number(data.total_pages || 1));
-    if (projectAssetsPagination.page > projectAssetsPagination.totalPages) {
-        return loadProjectAssets(projectAssetsPagination.totalPages);
-    }
-    if (countEl) countEl.textContent = tpFmt('projects.assetCount', `${data.total || 0} 个资产`, { count: data.total || 0 });
-    if (!currentProjectAssets.length) {
-        tbody.innerHTML = `<tr class="is-empty-row"><td colspan="7">${escapeHtml(tpFmt('projects.noBoundAssets', '暂无绑定到此项目的资产'))}</td></tr>`;
-        renderProjectAssetsPagination();
-        return;
-    }
-    tbody.innerHTML = currentProjectAssets.map((asset, index) => {
-        const target = asset.host || asset.domain || asset.ip || '-';
-        const service = [asset.protocol, asset.port ? ':' + asset.port : ''].join('') || '-';
-        const fingerprint = [asset.title, asset.server].filter(Boolean).join(' · ') || '-';
-        const updated = asset.last_seen_at ? new Date(asset.last_seen_at).toLocaleString() : '-';
-        const status = asset.status === 'inactive' ? tpFmt('assets.statusInactive', '停用') : tpFmt('assets.statusActive', '活跃');
-        return `<tr>
-            <td class="cell-summary"><button type="button" class="projects-asset-target" onclick="openProjectAssetDetail(${index})" title="${escapeHtml(target)}">${escapeHtml(target)}</button></td>
-            <td><code>${escapeHtml(service)}</code></td>
-            <td class="cell-summary" title="${escapeHtml(fingerprint)}">${escapeHtml(fingerprint)}</td>
-            <td>${escapeHtml(asset.source || '-')}</td>
-            <td>${escapeHtml(updated)}</td>
-            <td><span class="asset-status asset-status--${escapeHtml(asset.status || 'active')}">${escapeHtml(status)}</span></td>
-            <td class="col-actions"><div class="projects-table-actions"><button type="button" class="projects-action-btn projects-action-btn--mute" data-require-permission="asset:write" onclick="unbindAssetFromProject(${index})" title="${escapeHtml(tp('projects.unbindProjectTitle'))}">${escapeHtml(tp('projects.unbind'))}</button></div></td>
-        </tr>`;
-    }).join('');
-    renderProjectAssetsPagination();
-    const tableWrap = document.querySelector('#project-panel-assets .projects-table-wrap');
-    if (tableWrap) tableWrap.scrollTop = 0;
-}
-
-function renderProjectAssetsPagination() {
-    const root = document.getElementById('project-assets-pagination');
-    if (!root) return;
-    const { page, pageSize, total, totalPages } = projectAssetsPagination;
-    const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
-    const end = total === 0 ? 0 : Math.min(page * pageSize, total);
-    const atFirst = page <= 1 || total === 0;
-    const atLast = page >= totalPages || total === 0;
-    root.innerHTML = `<div class="pagination">
-        <div class="pagination-info">
-            <span>${escapeHtml(tpFmt('projects.paginationShow', `显示 ${start}-${end} / 共 ${total}`, { start, end, total }))}</span>
-            <label class="pagination-page-size">${escapeHtml(tpFmt('projects.paginationPerPage', '每页显示'))}
-                <select id="project-assets-page-size" onchange="changeProjectAssetsPageSize(this.value)">
-                    ${[10, 20, 50, 100].map(size => `<option value="${size}" ${size === pageSize ? 'selected' : ''}>${size}</option>`).join('')}
-                </select>
-            </label>
-        </div>
-        <div class="pagination-controls">
-            <button type="button" class="btn-secondary" onclick="loadProjectAssets(1)" ${atFirst ? 'disabled' : ''}>${escapeHtml(tpFmt('skillsPage.firstPage', '首页'))}</button>
-            <button type="button" class="btn-secondary" onclick="loadProjectAssets(${Math.max(1, page - 1)})" ${atFirst ? 'disabled' : ''}>${escapeHtml(tpFmt('projects.paginationPrev', '上一页'))}</button>
-            <span class="pagination-page">${escapeHtml(tpFmt('skillsPage.pageOf', `第 ${page} / ${totalPages} 页`, { current: page, total: totalPages }))}</span>
-            <button type="button" class="btn-secondary" onclick="loadProjectAssets(${Math.min(totalPages, page + 1)})" ${atLast ? 'disabled' : ''}>${escapeHtml(tpFmt('projects.paginationNext', '下一页'))}</button>
-            <button type="button" class="btn-secondary" onclick="loadProjectAssets(${totalPages})" ${atLast ? 'disabled' : ''}>${escapeHtml(tpFmt('skillsPage.lastPage', '尾页'))}</button>
-        </div>
-    </div>`;
-}
-
-function changeProjectAssetsPageSize(value) {
-    const size = Number(value);
-    if (![10, 20, 50, 100].includes(size)) return;
-    projectAssetsPagination.pageSize = size;
-    projectAssetsPagination.page = 1;
-    try {
-        localStorage.setItem(PROJECT_ASSETS_PAGE_SIZE_KEY, String(size));
-    } catch (e) { /* ignore */ }
-    loadProjectAssets(1);
-}
-
-function openProjectAssetDetail(index) {
-    const asset = currentProjectAssets[Number(index)];
-    if (asset && typeof window.openAssetDetailRecord === 'function') window.openAssetDetailRecord(asset);
-}
-
-async function unbindAssetFromProject(index) {
-    const asset = currentProjectAssets[Number(index)];
-    if (!asset || !asset.id || !currentProjectId) return;
-    const target = asset.host || asset.domain || asset.ip || asset.id;
-    const message = tpFmt('projects.unbindAssetConfirm', `确定将“${target}”从当前项目解绑吗？资产不会被删除。`, { target });
-    if (!confirm(message)) return;
-    try {
-        const res = await apiFetch('/api/assets/project-binding', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ asset_ids: [asset.id], project_id: '' })
-        });
-        if (!res.ok) throw new Error(await res.text());
-        if (typeof showInlineToast === 'function') {
-            showInlineToast(tpFmt('projects.unbindAssetDone', '已从项目解绑资产', { target }));
-        }
-        await loadProjectAssets(projectAssetsPagination.page);
-        await refreshProjectHeaderStats();
-    } catch (error) {
-        alert(`${tp('projects.unbindFailed')}: ${error.message || error}`);
-    }
-}
-
-let _selectedGraphFactKey = null;
-let _selectedGraphEdgeId = null;
-let _currentGraphData = null;
-let _graphConnectMode = false;
-let _graphConnectSource = null;
-
-function toggleProjectFactGraphConnectMode() {
-    _graphConnectMode = !_graphConnectMode;
-    _graphConnectSource = null;
-    const btn = document.getElementById('project-graph-connect-btn');
-    if (btn) {
-        btn.classList.toggle('is-active', _graphConnectMode);
-        btn.textContent = _graphConnectMode ? tp('projects.graphConnectActive') : tp('projects.graphConnect');
-        btn.classList.toggle('projects-graph-action-btn--connect-active', _graphConnectMode);
-    }
-    if (typeof ProjectFactGraph !== 'undefined') {
-        ProjectFactGraph.setConnectMode(_graphConnectMode, handleGraphConnectNodePick);
-    }
-}
-
-async function handleGraphConnectNodePick(factKey) {
-    if (!factKey || String(factKey).startsWith('vuln:')) return;
-    if (!requireProjectWrite()) return;
-    if (!_graphConnectSource) {
-        _graphConnectSource = factKey;
-        if (typeof showNotification === 'function') {
-            showNotification(tpFmt('projects.graphConnectPickTarget', `已选源节点 ${factKey}，请点击目标节点`, { source: factKey }), 'info');
-        }
-        return;
-    }
-    if (_graphConnectSource === factKey) return;
-    const edgeType = window.prompt(tp('projects.graphEdgeTypePrompt'), 'leads_to');
-    if (!edgeType) {
-        _graphConnectSource = null;
-        return;
-    }
-    const res = await apiFetch(`/api/projects/${currentProjectId}/fact-edges`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            source_fact_key: _graphConnectSource,
-            target_fact_key: factKey,
-            edge_type: edgeType.trim(),
-        }),
-    });
-    _graphConnectSource = null;
-    if (!(await notifyProjectApiFailure(res, 'projects.graphConnectFailed', '创建边失败'))) return;
-    if (typeof showNotification === 'function') showNotification(tp('projects.graphConnectSuccess'), 'success');
-    loadProjectFactGraph();
-    loadProjectFacts();
-}
-
-function formatIncomingLinksForModal(links) {
-    if (!links || !links.length) return '';
-    return links
-        .map((e) => `${e.edge_type || e.type}: ${e.source_fact_key || e.from}`)
-        .join('\n');
-}
 
 
-async function loadProjectFactGraph() {
-    const container = document.getElementById('project-fact-graph-container');
-    const statsEl = document.getElementById('project-fact-graph-stats');
-    if (!container || !currentProjectId) return;
-    container.innerHTML = `<div class="loading-spinner">${escapeHtml(tp('common.loading'))}</div>`;
-    closeProjectFactGraphSidebar();
-    const view = document.getElementById('project-graph-view')?.value || 'path';
-    const hideDeprecated = document.getElementById('project-facts-filter-hide-deprecated')?.checked !== false;
-    const params = new URLSearchParams({ view });
-    if (!hideDeprecated) params.set('exclude_deprecated', '0');
-    try {
-        const res = await apiFetch(`/api/projects/${currentProjectId}/fact-graph?${params}`);
-        if (!res.ok) throw new Error(tp('common.loadFailed'));
-        const data = await res.json();
-        _currentGraphData = data;
-        if (typeof ProjectFactGraph !== 'undefined') {
-            ProjectFactGraph.render(container, data, {
-                emptyText: tp('projects.graphEmpty'),
-                emptyTitle: tp('projects.graphEmptyTitle'),
-                emptySteps: [
-                    tp('projects.graphEmptyStep1'),
-                    tp('projects.graphEmptyStep2'),
-                    tp('projects.graphEmptyStep3'),
-                ],
-                emptyActionLabel: tp('projects.graphEmptyCta'),
-                onEmptyAction: () => showAddFactModal(),
-                onNodeSelect: (factKey) => showProjectFactGraphNode(factKey, _currentGraphData),
-                onEdgeSelect: (edgeId) => showProjectFactGraphEdge(edgeId, _currentGraphData),
-            });
-        }
-        const nodeCount = (data.nodes || []).length;
-        const edgeCount = (data.edges || []).length;
-        if (statsEl) {
-            statsEl.innerHTML =
-                `<span class="projects-graph-stat-badge"><strong>${nodeCount}</strong> ${escapeHtml(tp('projects.graphStatsNodes'))}</span>` +
-                `<span class="projects-graph-stat-badge"><strong>${edgeCount}</strong> ${escapeHtml(tp('projects.graphStatsEdges'))}</span>`;
-        }
-    } catch (e) {
-        container.innerHTML = `<div class="error-message">${escapeHtml(e.message || tp('common.loadFailed'))}</div>`;
-        if (statsEl) statsEl.textContent = '';
-    }
-}
 
-function filterProjectFactGraph() {
-    const q = document.getElementById('project-graph-search')?.value || '';
-    if (typeof ProjectFactGraph !== 'undefined') {
-        ProjectFactGraph.filterBySearch(q);
-    }
-}
 
-function centerProjectFactGraph() {
-    if (typeof ProjectFactGraph !== 'undefined') ProjectFactGraph.center();
-}
 
-function closeProjectFactGraphSidebar() {
-    _selectedGraphFactKey = null;
-    _selectedGraphEdgeId = null;
-    if (typeof ProjectFactGraph !== 'undefined') ProjectFactGraph.clearEdgeSelection();
-    const sidebar = document.getElementById('project-fact-graph-sidebar');
-    if (sidebar) sidebar.hidden = true;
-}
 
-function isSyntheticGraphEdge(edge) {
-    if (!edge) return true;
-    const id = String(edge.id || '');
-    const type = String(edge.type || '');
-    return id.startsWith('vuln-link:') || type === 'links_vuln';
-}
 
-function getGraphEdgesForFact(factKey, graphData) {
-    if (!factKey || !graphData?.edges) return [];
-    return graphData.edges.filter((e) => e.source === factKey || e.target === factKey);
-}
 
-function renderGraphEdgesListHtml(factKey, graphData, selectedEdgeId) {
-    const edges = getGraphEdgesForFact(factKey, graphData);
-    if (!edges.length) {
-        return `<p class="project-fact-graph-edges-empty">${escapeHtml(tp('projects.graphEdgesEmpty'))}</p>`;
-    }
-    return edges
-        .map((e) => {
-            const isOut = e.source === factKey;
-            const dirLabel = isOut ? tp('projects.graphEdgeFromSelf') : tp('projects.graphEdgeToSelf');
-            const src = e.source || '';
-            const tgt = e.target || '';
-            const selected = e.id === selectedEdgeId ? ' is-selected' : '';
-            const synthetic = isSyntheticGraphEdge(e);
-            const deleteBtn = synthetic
-                ? `<span class="project-fact-graph-edge-synthetic" title="${escapeHtml(tp('projects.graphEdgeSynthetic'))}">—</span>`
-                : `<button type="button" class="project-fact-graph-edge-delete" data-edge-id="${escapeAttr(e.id)}" onclick="event.stopPropagation(); deleteProjectFactEdge(this.dataset.edgeId)" title="${escapeAttr(tp('projects.graphDeleteEdge'))}"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>`;
-            return `<div class="project-fact-graph-edge-item${selected}" data-edge-id="${escapeAttr(e.id)}" onclick="focusProjectFactGraphEdge(${escapeJsStringAttr(e.id)})">
-                <span class="project-fact-graph-edge-dir">${escapeHtml(dirLabel)}</span>
-                <span class="project-fact-graph-edge-type">${escapeHtml(e.type || '')}</span>
-                <span class="project-fact-graph-edge-peer" title="${escapeHtml(src + ' → ' + tgt)}">${escapeHtml(src)} → ${escapeHtml(tgt)}</span>
-                ${deleteBtn}
-            </div>`;
-        })
-        .join('');
-}
 
-function renderProjectFactGraphEdges(factKey, graphData, selectedEdgeId) {
-    const wrap = document.getElementById('project-fact-graph-edges-wrap');
-    const list = document.getElementById('project-fact-graph-edges-list');
-    if (!wrap || !list) return;
-    const edges = getGraphEdgesForFact(factKey, graphData);
-    wrap.hidden = false;
-    list.innerHTML = renderGraphEdgesListHtml(factKey, graphData, selectedEdgeId);
-    if (selectedEdgeId) {
-        const selectedEl = list.querySelector('[data-edge-id="' + String(selectedEdgeId).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
-        if (selectedEl) selectedEl.scrollIntoView({ block: 'nearest' });
-    }
-    if (!edges.length) wrap.hidden = false;
-}
 
-function graphVulnIdFromKey(factKey) {
-    const key = String(factKey || '');
-    if (!key.startsWith('vuln:')) return null;
-    return key.slice(5);
-}
 
-function showProjectFactGraphNode(factKey, graphData, selectedEdgeId) {
-    if (!factKey) {
-        closeProjectFactGraphSidebar();
-        return;
-    }
-    _selectedGraphFactKey = factKey;
-    _selectedGraphEdgeId = selectedEdgeId || null;
-    const node = (graphData?.nodes || []).find((n) => n.fact_key === factKey || n.id === factKey);
-    const vulnId = graphVulnIdFromKey(factKey);
-    const isVulnNode = !!vulnId;
-    const sidebar = document.getElementById('project-fact-graph-sidebar');
-    const titleEl = document.getElementById('project-fact-graph-node-title');
-    const metaEl = document.getElementById('project-fact-graph-node-meta');
-    const categoryEl = document.getElementById('project-fact-graph-node-category');
-    const detailBtn = document.getElementById('project-fact-graph-detail-btn');
-    const editBtn = document.getElementById('project-fact-graph-edit-btn');
-    if (!sidebar || !titleEl || !metaEl) return;
-    titleEl.textContent = isVulnNode ? vulnId : factKey;
-    titleEl.title = isVulnNode ? vulnId : factKey;
-    if (categoryEl) {
-        const visualType =
-            typeof ProjectFactGraph !== 'undefined' && ProjectFactGraph.resolveGraphNodeType
-                ? ProjectFactGraph.resolveGraphNodeType(node)
-                : node?.type || node?.category || 'note';
-        const theme =
-            typeof ProjectFactGraph !== 'undefined' && ProjectFactGraph.nodeTheme
-                ? ProjectFactGraph.nodeTheme(visualType)
-                : { typeEn: String(visualType).toUpperCase(), typeLabel: visualType };
-        categoryEl.textContent = theme.typeEn || String(visualType).toUpperCase();
-        categoryEl.hidden = false;
-        categoryEl.className = 'project-fact-graph-node-category project-fact-graph-node-category--' + visualType;
-        categoryEl.title = theme.typeLabel || visualType;
-    }
-    const conf = node?.confidence || '';
-    const summary = (node?.summary || node?.label || '').trim();
-    if (summary || conf || isVulnNode) {
-        const parts = [];
-        if (summary) {
-            parts.push(`<span class="project-fact-graph-node-summary">${escapeHtml(summary)}</span>`);
-        }
-        if (isVulnNode) {
-            parts.push(
-                `<span class="project-fact-graph-node-vuln-hint">${escapeHtml(tp('projects.graphVulnSidebarHint'))}</span>`,
-            );
-        }
-        if (conf) {
-            parts.push(formatConfidenceBadge(conf));
-        }
-        metaEl.innerHTML = parts.join('');
-    } else {
-        metaEl.textContent = '';
-    }
-    if (detailBtn) {
-        detailBtn.textContent = isVulnNode ? tp('projects.viewVulnerability') : tp('projects.details');
-    }
-    if (editBtn) {
-        editBtn.hidden = isVulnNode;
-    }
-    renderProjectFactGraphEdges(factKey, graphData, _selectedGraphEdgeId);
-    if (_selectedGraphEdgeId && typeof ProjectFactGraph !== 'undefined') {
-        ProjectFactGraph.selectEdge(_selectedGraphEdgeId);
-    } else if (typeof ProjectFactGraph !== 'undefined') {
-        ProjectFactGraph.clearEdgeSelection();
-    }
-    sidebar.hidden = false;
-}
 
-function showProjectFactGraphEdge(edgeId, graphData) {
-    const edge = (graphData?.edges || []).find((e) => e.id === edgeId);
-    if (!edge) return;
-    const anchorKey = edge.source && !String(edge.source).startsWith('vuln:') ? edge.source : edge.target;
-    showProjectFactGraphNode(anchorKey, graphData, edgeId);
-}
 
-function focusProjectFactGraphEdge(edgeId) {
-    if (!edgeId || !_currentGraphData) return;
-    showProjectFactGraphEdge(edgeId, _currentGraphData);
-}
 
-async function deleteProjectFactEdge(edgeId) {
-    if (!edgeId || !currentProjectId) return;
-    if (!requireProjectWrite()) return;
-    const edge = (_currentGraphData?.edges || []).find((e) => e.id === edgeId);
-    if (isSyntheticGraphEdge(edge)) return;
-    if (!confirm(tp('projects.confirmDeleteGraphEdge'))) return;
-    const res = await apiFetch(`/api/projects/${currentProjectId}/fact-edges/${encodeURIComponent(edgeId)}`, {
-        method: 'DELETE',
-    });
-    if (!(await notifyProjectApiFailure(res, 'projects.graphEdgeDeleteFailed', '删除边失败'))) return;
-    if (typeof showNotification === 'function') showNotification(tp('projects.graphEdgeDeleteSuccess'), 'success');
-    const keepKey = _selectedGraphFactKey;
-    await loadProjectFactGraph();
-    if (keepKey) showProjectFactGraphNode(keepKey, _currentGraphData);
-    loadProjectFacts();
-}
 
-function openSelectedGraphFactDetail() {
-    if (!_selectedGraphFactKey) return;
-    const vulnId = graphVulnIdFromKey(_selectedGraphFactKey);
-    if (vulnId) {
-        openVulnerabilityDetail(vulnId);
-        return;
-    }
-    viewProjectFactBody(_selectedGraphFactKey);
-}
 
-function editSelectedGraphFact() {
-    if (_selectedGraphFactKey) showEditFactModal(_selectedGraphFactKey);
-}
 
-function buildProjectFactsQueryParams() {
-    const params = new URLSearchParams();
-    params.set('limit', '200');
-    params.set('include_link_counts', 'true');
-    const search = document.getElementById('project-facts-search')?.value?.trim();
-    const category = document.getElementById('project-facts-filter-category')?.value?.trim();
-    const confidence = document.getElementById('project-facts-filter-confidence')?.value?.trim();
-    const sparseOnly = document.getElementById('project-facts-filter-sparse')?.checked;
-    const hideDeprecated = document.getElementById('project-facts-filter-hide-deprecated')?.checked;
-    if (search) params.set('search', search);
-    if (category) params.set('category', category);
-    if (confidence) params.set('confidence', confidence);
-    if (sparseOnly) params.set('sparse_only', 'true');
-    if (hideDeprecated) params.set('exclude_deprecated', 'true');
-    return params;
-}
 
-function debouncedLoadProjectFacts() {
-    if (_projectFactsFilterDebounce) clearTimeout(_projectFactsFilterDebounce);
-    _projectFactsFilterDebounce = setTimeout(() => {
-        _projectFactsFilterDebounce = null;
-        loadProjectFacts();
-    }, 280);
-}
 
-async function loadProjectFacts() {
-    const tbody = document.getElementById('project-facts-tbody');
-    if (!tbody || !currentProjectId) return;
-    tbody.innerHTML = `<tr class="is-empty-row"><td colspan="8">${escapeHtml(tp('common.loading'))}</td></tr>`;
-    const qs = buildProjectFactsQueryParams().toString();
-    const res = await apiFetch(`/api/projects/${currentProjectId}/facts?${qs}`);
-    if (!res.ok) {
-        tbody.innerHTML = `<tr class="is-empty-row"><td colspan="8">${escapeHtml(tp('common.loadFailed'))}</td></tr>`;
-        return;
-    }
-    const facts = await res.json();
-    if (!facts.length) {
-        const hasFilter =
-            document.getElementById('project-facts-search')?.value?.trim() ||
-            document.getElementById('project-facts-filter-category')?.value ||
-            document.getElementById('project-facts-filter-confidence')?.value ||
-            document.getElementById('project-facts-filter-sparse')?.checked;
-        tbody.innerHTML = `<tr class="is-empty-row"><td colspan="8">${
-            hasFilter ? tp('projects.noMatchingFacts') : tp('projects.noFacts')
-        }</td></tr>`;
-        refreshProjectHeaderStats();
-        return;
-    }
-    tbody.innerHTML = facts.map((f) => {
-        const keyEsc = escapeHtml(f.fact_key);
-        const idEsc = escapeHtml(f.id);
-        const vulnLink = f.related_vulnerability_id
-            ? `<span class="projects-fact-vuln-link" title="${escapeHtml(tp('projects.relatedVulnIdTitle'))}">${escapeHtml(f.related_vulnerability_id.slice(0, 8))}…</span>`
-            : '';
-        const pinBadge = f.pinned
-            ? `<span class="projects-list-item-badge" title="${escapeHtml(tp('projects.pinned'))}">${escapeHtml(tp('projects.pinned'))}</span>`
-            : '';
-        const lc = f.link_counts || {};
-        const linkBadge =
-            lc.outgoing || lc.incoming
-                ? `<span class="projects-fact-link-badge" title="${escapeHtml(tp('projects.linkCountsTitle'))}">↑${lc.outgoing || 0} ↓${lc.incoming || 0}</span>`
-                : '<span class="projects-fact-link-badge projects-fact-link-badge--empty">—</span>';
-        return `<tr>
-            <td class="cell-fact-key"><code class="projects-fact-key-chip" title="${keyEsc}">${keyEsc}</code>${pinBadge}${vulnLink}</td>
-            <td class="cell-fact-category">${formatCategoryBadge(f.category)}</td>
-            <td class="cell-summary" title="${escapeHtml(f.summary)}">${escapeHtml(f.summary)}</td>
-            <td class="cell-fact-links">${linkBadge}</td>
-            <td>${formatFactBodyBadge(f)}</td>
-            <td>${formatConfidenceBadge(f.confidence)}</td>
-            <td>${formatProjectTime(f.updated_at, f.created_at)}</td>
-            <td class="col-actions">${renderProjectFactActions(keyEsc, idEsc, f.confidence)}</td>
-        </tr>`;
-    }).join('');
-    refreshProjectHeaderStats();
-}
+
+
+
+
+
+
+
+
 
 async function refreshProjectHeaderStats() {
     if (!currentProjectId) return;
@@ -1581,7 +931,6 @@ async function loadProjectConversations() {
             <td class="col-actions">
                 <div class="projects-table-actions">
                     <button type="button" class="projects-action-btn projects-action-btn--view" data-conv-id="${idEsc}" onclick="openProjectConversation(this.dataset.convId)">${escapeHtml(tp('projects.open'))}</button>
-                    <button type="button" class="projects-action-btn" data-conv-id="${idEsc}" onclick="promoteConversationAttackChain(this.dataset.convId)" title="${escapeHtml(tp('projects.promoteAttackChainTitle'))}">${escapeHtml(tp('projects.promoteAttackChain'))}</button>
                     <button type="button" class="projects-action-btn projects-action-btn--mute" data-conv-id="${idEsc}" onclick="unbindConversationFromProject(this.dataset.convId)" title="${escapeHtml(tp('projects.unbindProjectTitle'))}">${escapeHtml(tp('projects.unbind'))}</button>
                 </div>
             </td>
@@ -1602,29 +951,6 @@ function openProjectConversation(conversationId) {
     }, 200);
 }
 
-async function promoteConversationAttackChain(conversationId) {
-    if (!currentProjectId || !conversationId) return;
-    if (!requireProjectWrite()) return;
-    if (!confirm(tp('projects.confirmPromoteAttackChain'))) return;
-    const res = await apiFetch(
-        `/api/projects/${currentProjectId}/promote-attack-chain/${encodeURIComponent(conversationId)}`,
-        { method: 'POST' },
-    );
-    if (!(await notifyProjectApiFailure(res, 'projects.promoteAttackChainFailed', '沉淀失败'))) return;
-    const data = await res.json();
-    if (typeof showNotification === 'function') {
-        showNotification(
-            tpFmt(
-                'projects.promoteAttackChainSuccess',
-                `已沉淀 ${data.facts_created || 0} 新 / ${data.facts_updated || 0} 更新 / ${data.edges_created || 0} 边`,
-                data,
-            ),
-            'success',
-        );
-    }
-    loadProjectFacts();
-    if (currentProjectTab === 'graph') loadProjectFactGraph();
-}
 
 async function unbindConversationFromProject(conversationId) {
     if (!conversationId || !confirm(tp('projects.confirmUnbindConversation'))) return;
@@ -1638,210 +964,14 @@ async function unbindConversationFromProject(conversationId) {
     refreshProjectHeaderStats();
 }
 
-let _factDetailKey = null;
-let _factDetailFact = null;
-let _projectFactsFilterDebounce = null;
 
-async function viewProjectFactBody(factKey) {
-    document.getElementById('fact-detail-title').textContent = factKey;
-    document.getElementById('fact-detail-meta').textContent = '…';
-    document.getElementById('fact-detail-body').textContent = '';
-    const warnEl = document.getElementById('fact-detail-sparse-warn');
-    if (warnEl) {
-        warnEl.hidden = true;
-        warnEl.textContent = '';
-    }
-    const linkBtn = document.getElementById('fact-detail-link-vuln-btn');
-    const createBtn = document.getElementById('fact-detail-create-vuln-btn');
-    if (linkBtn) linkBtn.hidden = true;
-    if (createBtn) createBtn.hidden = true;
-    openProjectsOverlay('fact-detail-modal', { focus: false });
-    const res = await apiFetch(`/api/projects/${currentProjectId}/facts?fact_key=${encodeURIComponent(factKey)}`);
-    if (!res.ok) {
-        closeFactDetailModal();
-        return alert(tp('common.loadFailed'));
-    }
-    const f = await res.json();
-    _factDetailKey = f.fact_key;
-    _factDetailFact = f;
-    deferModalContent(() => {
-        document.getElementById('fact-detail-title').textContent = `[${f.fact_key}]`;
-        const metaParts = [
-            tpFmt('projects.factMetaCategory', `Category: ${f.category}`, { value: f.category }),
-            tpFmt('projects.factMetaConfidence', `Confidence: ${f.confidence}`, { value: f.confidence }),
-            tpFmt('projects.factMetaUpdated', `Updated: ${formatProjectTime(f.updated_at, f.created_at)}`, {
-                time: formatProjectTime(f.updated_at, f.created_at),
-            }),
-        ];
-        if (f.related_vulnerability_id) metaParts.push(tpFmt('projects.factMetaRelatedVuln', `Related vulnerability: ${f.related_vulnerability_id}`, { value: f.related_vulnerability_id }));
-        if (f.source_conversation_id) metaParts.push(tpFmt('projects.factMetaSourceConversation', `Source conversation: ${f.source_conversation_id}`, { value: f.source_conversation_id }));
-        document.getElementById('fact-detail-meta').textContent = metaParts.join(' · ');
-        document.getElementById('fact-detail-body').textContent = f.body || tp('projects.emptyBody');
-        if (warnEl) {
-            if (isSparseFactBody(f.category, f.fact_key, f.body)) {
-                warnEl.hidden = false;
-                warnEl.textContent = tp('projects.factSparseWarn');
-            } else {
-                warnEl.hidden = true;
-                warnEl.textContent = '';
-            }
-        }
-        if (linkBtn) linkBtn.hidden = false;
-        if (createBtn) createBtn.hidden = false;
-    });
-}
 
-function editFactFromDetail() {
-    const key = _factDetailKey;
-    closeFactDetailModal();
-    if (key) showEditFactModal(key);
-}
 
-function closeFactDetailModal() {
-    closeProjectsOverlay('fact-detail-modal');
-    _factDetailKey = null;
-    _factDetailFact = null;
-}
 
-async function linkFactToExistingVulnerability() {
-    const f = _factDetailFact;
-    if (!f || !currentProjectId) return;
-    const res = await apiFetch(`/api/vulnerabilities?project_id=${encodeURIComponent(currentProjectId)}&limit=50`);
-    if (!res.ok) return alert(tp('projects.loadVulnerabilityListFailed'));
-    const data = await res.json();
-    const items = data.Vulnerabilities || data.vulnerabilities || data.items || [];
-    if (!items.length) return alert(tp('projects.noVulnerabilitiesInProject'));
-    const lines = items.map((v, i) => `${i + 1}. [${v.severity}] ${v.title} (${v.id})`);
-    const pick = prompt(
-        tp('projects.promptLinkFactToVuln', {
-            factKey: f.fact_key,
-            lines: lines.join('\n'),
-            interpolation: { escapeValue: false },
-        }) || `Enter index to link fact "${f.fact_key}":\n\n${lines.join('\n')}`,
-    );
-    if (pick == null || pick === '') return;
-    const idx = parseInt(pick, 10) - 1;
-    if (Number.isNaN(idx) || idx < 0 || idx >= items.length) return alert(tp('projects.invalidIndex'));
-    const vulnId = items[idx].id;
-    const upd = await apiFetch(`/api/projects/${currentProjectId}/facts/${encodeURIComponent(f.id)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            fact_key: f.fact_key,
-            category: f.category,
-            summary: f.summary,
-            body: f.body || '',
-            confidence: f.confidence,
-            related_vulnerability_id: vulnId,
-        }),
-    });
-    if (!upd.ok) return alert(tp('projects.linkFailed'));
-    alert(tp('projects.linkSuccess'));
-    closeFactDetailModal();
-    loadProjectFacts();
-}
 
-async function createVulnerabilityFromCurrentFact() {
-    const f = _factDetailFact;
-    if (!f || !currentProjectId) return;
-    if (typeof requirePermission === 'function' && !requirePermission('vulnerability:write')) return;
-    let convId =
-        (f.source_conversation_id || '').trim() ||
-        (typeof window.currentConversationId === 'string' ? window.currentConversationId.trim() : '');
-    if (!convId) {
-        convId = prompt(tp('projects.promptConversationIdForVulnCreate'), '')?.trim() || '';
-    }
-    if (!convId) return alert(tp('projects.cancelledNoConversationId'));
-    const severity = inferSeverityFromFact(f);
-    const body = {
-        conversation_id: convId,
-        project_id: currentProjectId,
-        title: (f.summary || f.fact_key).slice(0, 200),
-        description:
-            tp('projects.generatedFromFact', {
-                factKey: f.fact_key,
-                interpolation: { escapeValue: false },
-            }) || `Generated from project fact ${f.fact_key}`,
-        severity,
-        status: 'open',
-        type: f.category || 'finding',
-        target: '',
-        proof: f.body || '',
-        impact: '',
-        recommendation: '',
-    };
-    const res = await apiFetch('/api/vulnerabilities', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-    });
-    if (!(await notifyProjectApiFailure(res, 'projects.createVulnerabilityFailed', '创建漏洞失败'))) return;
-    const vuln = await res.json();
-    const upd = await apiFetch(`/api/projects/${currentProjectId}/facts/${encodeURIComponent(f.id)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            fact_key: f.fact_key,
-            category: f.category,
-            summary: f.summary,
-            body: f.body || '',
-            confidence: f.confidence,
-            related_vulnerability_id: vuln.id,
-        }),
-    });
-    if (!(await notifyProjectApiFailure(upd, 'projects.linkFailed', '关联失败'))) return;
-    const createdVulnLabel = vuln.title || vuln.id;
-    const successMsg = tp('projects.createVulnerabilityAndLinkSuccess', {
-        value: createdVulnLabel,
-        interpolation: { escapeValue: false },
-    });
-    alert(successMsg || `Created and linked vulnerability: ${createdVulnLabel}`);
-    closeFactDetailModal();
-    loadProjectFacts();
-    if (currentProjectTab === 'vulns') loadProjectVulnerabilities();
-}
 
-function inferSeverityFromFact(f) {
-    const c = (f.category || '').toLowerCase();
-    const key = (f.fact_key || '').toLowerCase();
-    if (c === 'exploit' || c === 'poc' || key.includes('rce') || key.includes('sqli')) return 'high';
-    if (c === 'finding' || c === 'chain') return 'medium';
-    return 'medium';
-}
 
-async function deprecateProjectFactByKey(factKey) {
-    if (!requireProjectWrite()) return;
-    if (!confirm(
-        tp('projects.confirmDeprecateFact', {
-            factKey,
-            interpolation: { escapeValue: false },
-        }) || `Deprecate fact ${factKey}?`,
-    )) return;
-    const res = await apiFetch(`/api/projects/${currentProjectId}/facts/deprecate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fact_key: factKey }),
-    });
-    if (!(await notifyProjectApiFailure(res, 'projects.operationFailed', '操作失败'))) return;
-    loadProjectFacts();
-}
 
-async function restoreProjectFactByKey(factKey) {
-    if (!requireProjectWrite()) return;
-    if (!confirm(
-        tp('projects.confirmRestoreFact', {
-            factKey,
-            interpolation: { escapeValue: false },
-        }) || `Restore fact ${factKey}? It will re-enter the board index with tentative status.`,
-    )) return;
-    const res = await apiFetch(`/api/projects/${currentProjectId}/facts/restore`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fact_key: factKey, confidence: 'tentative' }),
-    });
-    if (!(await notifyProjectApiFailure(res, 'projects.operationFailed', '操作失败'))) return;
-    loadProjectFacts();
-}
 
 function openVulnerabilitiesForProject(projectId) {
     const pid = projectId || currentProjectId;
@@ -1884,7 +1014,6 @@ async function loadProjectVulnerabilities() {
             <td class="col-actions">
                 <div class="projects-table-actions">
                     <button type="button" class="projects-action-btn projects-action-btn--view" data-vuln-id="${idEsc}" onclick="openVulnerabilityDetail(this.dataset.vulnId)">${escapeHtml(tp('common.view'))}</button>
-                    <button type="button" class="projects-action-btn projects-action-btn--view" data-vuln-id="${idEsc}" onclick="viewFactsForVulnerability(this.dataset.vulnId)" title="${escapeHtml(tp('projects.viewRelatedFactsTitle'))}">${escapeHtml(tp('projects.facts'))}</button>
                 </div>
             </td>
         </tr>`;
@@ -1899,47 +1028,6 @@ function openVulnerabilityDetail(vulnId) {
     }
 }
 
-async function viewFactsForVulnerability(vulnId) {
-    if (!currentProjectId) return;
-    switchProjectTab('facts');
-    const searchEl = document.getElementById('project-facts-search');
-    const catEl = document.getElementById('project-facts-filter-category');
-    const confEl = document.getElementById('project-facts-filter-confidence');
-    const sparseEl = document.getElementById('project-facts-filter-sparse');
-    const hideDepEl = document.getElementById('project-facts-filter-hide-deprecated');
-    if (searchEl) searchEl.value = '';
-    if (catEl) catEl.value = '';
-    if (confEl) confEl.value = '';
-    if (sparseEl) sparseEl.checked = false;
-    if (hideDepEl) hideDepEl.checked = true;
-    const params = new URLSearchParams({ limit: '50', related_vulnerability_id: vulnId });
-    const res = await apiFetch(`/api/projects/${currentProjectId}/facts?${params}`);
-    if (!res.ok) return alert(tp('projects.loadRelatedFactsFailed'));
-    const facts = await res.json();
-    if (!facts.length) {
-        alert(tp('projects.noFactsForVulnerability'));
-        loadProjectFacts();
-        return;
-    }
-    if (facts.length === 1) {
-        viewProjectFactBody(facts[0].fact_key);
-        return;
-    }
-    const pick = prompt(
-        tp('projects.promptChooseFactByIndex', {
-            count: facts.length,
-            lines: facts.map((f, i) => `${i + 1}. ${f.fact_key}`).join('\n'),
-            interpolation: { escapeValue: false },
-        }) || `This vulnerability is linked to ${facts.length} facts. Enter index to view:\n${facts.map((f, i) => `${i + 1}. ${f.fact_key}`).join('\n')}`,
-    );
-    if (pick == null || pick === '') {
-        loadProjectFacts();
-        return;
-    }
-    const idx = parseInt(pick, 10) - 1;
-    if (facts[idx]) viewProjectFactBody(facts[idx].fact_key);
-    else loadProjectFacts();
-}
 
 function openProjectsOverlay(id, opts) {
     openAppModal(id, opts);
@@ -1962,15 +1050,13 @@ function showNewProjectModal() {
     if (submitBtn) submitBtn.textContent = tp('projects.createProject');
     document.getElementById('project-modal-name').value = '';
     document.getElementById('project-modal-description').value = '';
-    window._projectModalEditId = null;
-    openProjectsOverlay('project-modal');
+        openProjectsOverlay('project-modal');
 }
 
 async function showEditProjectModal(projectId, options = {}) {
     if (!projectId) return;
     if (!requireProjectWrite()) return;
-    window._projectModalFromChat = false;
-    window._projectModalFromChatSidebar = options.fromChatSidebar === true;
+        window._projectModalFromChatSidebar = options.fromChatSidebar === true;
     window._projectModalEditId = projectId;
     document.getElementById('project-modal-title').textContent = tp('projects.modalEditTitle');
     const sub = document.getElementById('project-modal-subtitle');
@@ -1991,8 +1077,7 @@ async function showEditProjectModal(projectId, options = {}) {
         } catch (e) {
             closeProjectModal();
             alert(e.message || tp('projects.projectNotFound'));
-            window._projectModalEditId = null;
-            return;
+                        return;
         }
     }
     const name = (p.name || '').slice(0, PROJECT_NAME_MAX_LENGTH);
@@ -2007,16 +1092,13 @@ async function showEditProjectModal(projectId, options = {}) {
 /** 从对话区「选择项目」面板打开新建项目，创建成功后自动绑定当前对话 */
 function showNewProjectModalFromChat() {
     closeChatProjectPanel();
-    window._projectModalFromChat = true;
-    showNewProjectModal();
+        showNewProjectModal();
 }
 
 /** 从对话侧栏新建项目，保持当前对话的项目绑定不变。 */
 function showNewProjectModalFromChatSidebar() {
     if (!requireProjectWrite()) return;
-    window._projectModalFromChat = false;
-    window._projectModalFromChatSidebar = true;
-    showNewProjectModal();
+            showNewProjectModal();
 }
 
 async function saveProjectModal() {
@@ -2038,9 +1120,7 @@ async function saveProjectModal() {
         const fromChat = !!window._projectModalFromChat;
         const fromChatSidebar = !!window._projectModalFromChatSidebar;
         const fromWebshellConnId = window._projectModalFromWebshellConnId || '';
-        window._projectModalFromChat = false;
-        window._projectModalFromChatSidebar = false;
-        window._projectModalFromWebshellConnId = '';
+                        window._projectModalFromWebshellConnId = '';
         closeProjectModal();
         const saved = await res.json();
         await loadProjectsList();
@@ -2067,10 +1147,7 @@ async function saveProjectModal() {
 }
 
 function closeProjectModal() {
-    window._projectModalFromChat = false;
-    window._projectModalFromChatSidebar = false;
-    window._projectModalEditId = null;
-    closeProjectsOverlay('project-modal');
+                closeProjectsOverlay('project-modal');
 }
 
 function formatProjectScopeJson() {
@@ -2325,143 +1402,12 @@ async function deleteCurrentProject() {
     await deleteProjectById(currentProjectId);
 }
 
-function resetFactModalForm() {
-    window._factModalEditId = null;
-    const keyEl = document.getElementById('fact-modal-key');
-    if (keyEl) keyEl.disabled = false;
-    document.getElementById('fact-modal-title').textContent = tp('projects.addFact');
-    document.getElementById('fact-modal-submit-btn').textContent = tp('projects.saveFact');
-    document.getElementById('fact-modal-key').value = '';
-    document.getElementById('fact-modal-category').value = 'note';
-    document.getElementById('fact-modal-summary').value = '';
-    document.getElementById('fact-modal-body').value = '';
-    document.getElementById('fact-modal-confidence').value = 'tentative';
-    const pinEl = document.getElementById('fact-modal-pinned');
-    if (pinEl) pinEl.checked = false;
-    const rel = document.getElementById('fact-modal-related-vuln');
-    if (rel) rel.value = '';
-    const linksEl = document.getElementById('fact-modal-links');
-    if (linksEl) linksEl.value = '';
-    const incomingWrap = document.getElementById('fact-modal-incoming-links-wrap');
-    if (incomingWrap) incomingWrap.hidden = true;
-    updateFactFormHints();
-}
 
-function fillFactModalForm(f) {
-    window._factModalEditId = f.id;
-    document.getElementById('fact-modal-title').textContent = tp('projects.editFact');
-    document.getElementById('fact-modal-submit-btn').textContent = tp('projects.saveChanges');
-    document.getElementById('fact-modal-key').value = f.fact_key || '';
-    const catEl = document.getElementById('fact-modal-category');
-    const cat = (f.category || 'note').trim().toLowerCase();
-    if (catEl) {
-        const known = Array.from(catEl.options).some((o) => o.value === cat);
-        if (known) catEl.value = cat;
-        else {
-            const opt = document.createElement('option');
-            opt.value = f.category;
-            opt.textContent = tpFmt('projects.customCategoryOption', `${f.category} (custom)`, { value: f.category });
-            catEl.appendChild(opt);
-            catEl.value = f.category;
-        }
-    }
-    document.getElementById('fact-modal-summary').value = f.summary || '';
-    document.getElementById('fact-modal-body').value = f.body || '';
-    const conf = (f.confidence || 'tentative').toLowerCase();
-    const confEl = document.getElementById('fact-modal-confidence');
-    if (confEl) {
-        const allowed = ['tentative', 'confirmed', 'deprecated'];
-        confEl.value = allowed.includes(conf) ? conf : 'tentative';
-    }
-    const rel = document.getElementById('fact-modal-related-vuln');
-    if (rel) rel.value = f.related_vulnerability_id || '';
-    const linksEl = document.getElementById('fact-modal-links');
-    if (linksEl) linksEl.value = formatIncomingLinksForModal(f.incoming_links);
-    const pinEl = document.getElementById('fact-modal-pinned');
-    if (pinEl) pinEl.checked = !!f.pinned;
-    updateFactFormHints();
-}
 
-function showAddFactModal() {
-    if (!currentProjectId) return alert(tp('projects.selectProjectFirst'));
-    if (!requireProjectWrite()) return;
-    resetFactModalForm();
-    openProjectsOverlay('fact-modal');
-}
 
-async function showEditFactModal(factKey) {
-    if (!currentProjectId) return alert(tp('projects.selectProjectFirst'));
-    if (!requireProjectWrite()) return;
-    resetFactModalForm();
-    openProjectsOverlay('fact-modal', { focus: false });
-    const res = await apiFetch(
-        `/api/projects/${currentProjectId}/facts?fact_key=${encodeURIComponent(factKey)}&include_links=true`,
-    );
-    if (!res.ok) {
-        closeFactModal();
-        return alert(tp('projects.loadFactFailed'));
-    }
-    const f = await res.json();
-    deferModalContent(() => {
-        fillFactModalForm(f);
-        document.getElementById('fact-modal-key')?.focus();
-    });
-}
 
-function closeFactModal() {
-    closeProjectsOverlay('fact-modal');
-    resetFactModalForm();
-}
 
-async function saveFactModal() {
-    if (!requireProjectWrite()) return;
-    const fact_key = document.getElementById('fact-modal-key').value.trim();
-    const summary = document.getElementById('fact-modal-summary').value.trim();
-    const category = document.getElementById('fact-modal-category').value.trim() || 'note';
-    const body = document.getElementById('fact-modal-body').value;
-    if (!fact_key || !summary) return alert(tp('projects.factKeySummaryRequired'));
-    if (isSparseFactBody(category, fact_key, body)) {
-        const ok = confirm(
-            tp('projects.confirmSaveSparseFact'),
-        );
-        if (!ok) return;
-    }
-    const payload = {
-        fact_key,
-        category,
-        summary,
-        body,
-        confidence: document.getElementById('fact-modal-confidence').value,
-        pinned: !!document.getElementById('fact-modal-pinned')?.checked,
-        related_vulnerability_id: document.getElementById('fact-modal-related-vuln')?.value?.trim() || '',
-        links_text: document.getElementById('fact-modal-links')?.value || '',
-    };
-    const editId = window._factModalEditId;
-    const res = editId
-        ? await apiFetch(`/api/projects/${currentProjectId}/facts/${editId}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-          })
-        : await apiFetch(`/api/projects/${currentProjectId}/facts`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-          });
-    if (!(await notifyProjectApiFailure(res, 'projects.saveFailed', '保存失败'))) return;
-    closeFactModal();
-    loadProjectFacts();
-    if (currentProjectTab === 'graph') loadProjectFactGraph();
-}
 
-async function deleteProjectFact(id) {
-    if (!requireProjectWrite()) return;
-    if (!confirm(tp('projects.confirmDeleteFact'))) return;
-    const res = await apiFetch(`/api/projects/${currentProjectId}/facts/${id}`, { method: 'DELETE' });
-    if (!(await notifyProjectApiFailure(res, 'projects.operationFailed', '操作失败'))) return;
-    loadProjectFacts();
-    if (currentProjectTab === 'graph') loadProjectFactGraph();
-}
 
 function parseProjectDate(t) {
     if (t == null || t === '') return null;
@@ -2651,8 +1597,7 @@ function initProjectConversationReadTracking() {
     if (window._projectConversationReadTrackingInited) return;
     const chatContainer = document.querySelector('#page-chat .chat-container');
     if (!chatContainer) return;
-    window._projectConversationReadTrackingInited = true;
-    const markViewed = () => markCurrentProjectConversationViewed();
+        const markViewed = () => markCurrentProjectConversationViewed();
     chatContainer.addEventListener('pointerdown', markViewed, { passive: true });
     chatContainer.addEventListener('focusin', markViewed);
     document.getElementById('chat-input')?.addEventListener('input', markViewed);
@@ -3734,8 +2679,7 @@ window.setProjectConversationApprovalStatus = setProjectConversationApprovalStat
 window.syncProjectConversationApprovalStatuses = syncProjectConversationApprovalStatuses;
 
 if (!window._projectConversationActionEventsBound) {
-    window._projectConversationActionEventsBound = true;
-    document.addEventListener('conversation-pinned-changed', (event) => {
+        document.addEventListener('conversation-pinned-changed', (event) => {
         const details = event?.detail || {};
         updateChatProjectConversationPinnedState(details.conversationId, details.pinned);
         refreshChatProjectFoldersAfterAction();
@@ -3748,8 +2692,7 @@ if (!window._projectConversationActionEventsBound) {
 }
 
 if (!window._projectApprovalStatusEventsBound) {
-    window._projectApprovalStatusEventsBound = true;
-    window.addEventListener('hitl-interrupt', (event) => {
+        window.addEventListener('hitl-interrupt', (event) => {
         const details = event && event.detail ? event.detail : {};
         setProjectConversationApprovalStatus(details.conversationId || window.currentConversationId || '', true, details);
     });
@@ -3765,7 +2708,7 @@ function appendChatProjectPanelItem(list, project, selectedId, onSelect, tFn) {
     const isSelected = isNone ? !selectedId : selectedId === project.id;
     const fullDesc = isNone
         ? (project.description || '')
-        : (project.description || '').trim() || t('projects.sharedFactBoard');
+        : (project.description || '').trim() || '';
     const desc = isNone
         ? (project.description || '')
         : fullDesc.slice(0, 80);
@@ -4050,10 +2993,8 @@ async function onChatProjectChange() {
 
 function initChatProjectSelector() {
     if (window._chatProjectSelectorInited) return;
-    window._chatProjectSelectorInited = true;
-    if (!window._projectsLanguageListenerBound) {
-        window._projectsLanguageListenerBound = true;
-        document.addEventListener('languagechange', () => {
+        if (!window._projectsLanguageListenerBound) {
+                document.addEventListener('languagechange', () => {
             renderProjectsSidebar();
             renderProjectsPagination();
             syncAllProjectsFilterSelects();
@@ -4067,7 +3008,7 @@ function initChatProjectSelector() {
                 const p = source.find((x) => x.id === currentProjectId);
                 if (p) updateProjectStatusPill(p.status || 'active');
                 refreshProjectHeaderStats().catch(() => {});
-                switchProjectTab(currentProjectTab || 'facts');
+                switchProjectTab(currentProjectTab || 'conversations');
             }
         });
     }
@@ -4082,19 +3023,6 @@ function initChatProjectSelector() {
     });
 }
 
-function initProjectGraphFooterWheelScroll() {
-    const footer = document.querySelector('.project-fact-graph-footer');
-    if (!footer || footer.dataset.wheelScrollBound === 'true') return;
-    footer.dataset.wheelScrollBound = 'true';
-    footer.addEventListener('wheel', (event) => {
-        if (footer.scrollWidth <= footer.clientWidth || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
-        const maxScrollLeft = footer.scrollWidth - footer.clientWidth;
-        const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, footer.scrollLeft + event.deltaY));
-        if (nextScrollLeft === footer.scrollLeft) return;
-        footer.scrollLeft = nextScrollLeft;
-        event.preventDefault();
-    }, { passive: false });
-}
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
@@ -4121,12 +3049,6 @@ window.saveProjectModal = saveProjectModal;
 window.closeProjectModal = closeProjectModal;
 window.selectProject = selectProject;
 window.switchProjectTab = switchProjectTab;
-window.showAddFactModal = showAddFactModal;
-window.showEditFactModal = showEditFactModal;
-window.editFactFromDetail = editFactFromDetail;
-window.saveFactModal = saveFactModal;
-window.closeFactModal = closeFactModal;
-window.closeFactDetailModal = closeFactDetailModal;
 window.saveProjectSettings = saveProjectSettings;
 window.archiveCurrentProject = archiveCurrentProject;
 window.deleteCurrentProject = deleteCurrentProject;
@@ -4155,11 +3077,6 @@ window.prefetchProjectsForChat = prefetchProjectsForChat;
 window.ensureDefaultActiveProjectForNewChat = ensureDefaultActiveProjectForNewChat;
 window.getActiveProjectId = getActiveProjectId;
 window.getProjectName = getProjectName;
-window.viewProjectFactBody = viewProjectFactBody;
-window.insertFactBodyTemplate = insertFactBodyTemplate;
-window.updateFactFormHints = updateFactFormHints;
-window.deprecateProjectFactByKey = deprecateProjectFactByKey;
-window.restoreProjectFactByKey = restoreProjectFactByKey;
 window.openVulnerabilitiesForProject = openVulnerabilitiesForProject;
 window.openVulnerabilityDetail = openVulnerabilityDetail;
 window.filterProjectsList = filterProjectsList;
@@ -4167,28 +3084,12 @@ window.goProjectsPage = goProjectsPage;
 window.changeProjectsPageSize = changeProjectsPageSize;
 window.parseProjectsListResponse = parseProjectsListResponse;
 window.fetchAllProjects = fetchAllProjects;
-window.debouncedLoadProjectFacts = debouncedLoadProjectFacts;
 window.debouncedLoadProjectVulnerabilities = debouncedLoadProjectVulnerabilities;
 window.loadProjectVulnerabilities = loadProjectVulnerabilities;
-window.linkFactToExistingVulnerability = linkFactToExistingVulnerability;
-window.createVulnerabilityFromCurrentFact = createVulnerabilityFromCurrentFact;
-window.viewFactsForVulnerability = viewFactsForVulnerability;
 window.openProjectConversation = openProjectConversation;
 window.unbindConversationFromProject = unbindConversationFromProject;
 window.loadProjectConversations = loadProjectConversations;
-window.loadProjectAssets = loadProjectAssets;
-window.openProjectAssetDetail = openProjectAssetDetail;
-window.unbindAssetFromProject = unbindAssetFromProject;
-window.loadProjectFactGraph = loadProjectFactGraph;
-window.filterProjectFactGraph = filterProjectFactGraph;
-window.centerProjectFactGraph = centerProjectFactGraph;
-window.closeProjectFactGraphSidebar = closeProjectFactGraphSidebar;
-window.openSelectedGraphFactDetail = openSelectedGraphFactDetail;
-window.editSelectedGraphFact = editSelectedGraphFact;
 window.promoteConversationAttackChain = promoteConversationAttackChain;
-window.deleteProjectFactEdge = deleteProjectFactEdge;
-window.focusProjectFactGraphEdge = focusProjectFactGraphEdge;
-window.toggleProjectFactGraphConnectMode = toggleProjectFactGraphConnectMode;
 window.rebuildProjectNameMap = rebuildProjectNameMap;
 window.rememberProjectsInNameMap = rememberProjectsInNameMap;
 window.searchActiveProjects = searchActiveProjects;

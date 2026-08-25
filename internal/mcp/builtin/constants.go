@@ -8,22 +8,6 @@ const (
 	ToolListVulnerabilities = "list_vulnerabilities"
 	ToolGetVulnerability    = "get_vulnerability"
 
-	// 资产管理工具
-	ToolCreateAsset       = "create_asset"
-	ToolGetAsset          = "get_asset"
-	ToolQueryAssets       = "query_assets"
-	ToolUpdateAsset       = "update_asset"
-	ToolDeleteAsset       = "delete_asset"
-	ToolCompleteAssetScan = "complete_asset_scan"
-
-	// 项目黑板（事实）工具
-	ToolUpsertProjectFact    = "upsert_project_fact"
-	ToolGetProjectFact       = "get_project_fact"
-	ToolListProjectFacts     = "list_project_facts"
-	ToolSearchProjectFacts   = "search_project_facts"
-	ToolDeprecateProjectFact = "deprecate_project_fact"
-	ToolRestoreProjectFact   = "restore_project_fact"
-
 	// 知识库工具
 	ToolListKnowledgeRiskTypes = "list_knowledge_risk_types"
 	ToolSearchKnowledgeBase    = "search_knowledge_base"
@@ -82,18 +66,6 @@ func IsBuiltinTool(toolName string) bool {
 	case ToolRecordVulnerability,
 		ToolListVulnerabilities,
 		ToolGetVulnerability,
-		ToolCreateAsset,
-		ToolGetAsset,
-		ToolQueryAssets,
-		ToolUpdateAsset,
-		ToolDeleteAsset,
-		ToolCompleteAssetScan,
-		ToolUpsertProjectFact,
-		ToolGetProjectFact,
-		ToolListProjectFacts,
-		ToolSearchProjectFacts,
-		ToolDeprecateProjectFact,
-		ToolRestoreProjectFact,
 		ToolListKnowledgeRiskTypes,
 		ToolSearchKnowledgeBase,
 		ToolAnalyzeImage,
@@ -144,18 +116,6 @@ func GetAllBuiltinTools() []string {
 		ToolRecordVulnerability,
 		ToolListVulnerabilities,
 		ToolGetVulnerability,
-		ToolCreateAsset,
-		ToolGetAsset,
-		ToolQueryAssets,
-		ToolUpdateAsset,
-		ToolDeleteAsset,
-		ToolCompleteAssetScan,
-		ToolUpsertProjectFact,
-		ToolGetProjectFact,
-		ToolListProjectFacts,
-		ToolSearchProjectFacts,
-		ToolDeprecateProjectFact,
-		ToolRestoreProjectFact,
 		ToolListKnowledgeRiskTypes,
 		ToolSearchKnowledgeBase,
 		ToolAnalyzeImage,

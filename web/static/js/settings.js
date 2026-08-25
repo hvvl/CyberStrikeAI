@@ -768,19 +768,6 @@ async function loadConfig(loadTools = true, options = {}) {
         fillVisionConfigFromCurrent(currentConfig.vision || {});
         initModelListControls();
 
-        // 填充FOFA配置
-        const fofa = currentConfig.fofa || {};
-        const fofaKeyEl = document.getElementById('fofa-api-key');
-        const fofaBaseUrlEl = document.getElementById('fofa-base-url');
-        if (fofaKeyEl) fofaKeyEl.value = fofa.api_key || '';
-        if (fofaBaseUrlEl) fofaBaseUrlEl.value = fofa.base_url || '';
-        ['zoomeye', 'quake', 'shodan'].forEach((name) => {
-            const cfg = currentConfig[name] || {};
-            const keyEl = document.getElementById(`${name}-api-key`);
-            const baseUrlEl = document.getElementById(`${name}-base-url`);
-            if (keyEl) keyEl.value = cfg.api_key || '';
-            if (baseUrlEl) baseUrlEl.value = cfg.base_url || '';
-        });
 
         // 填充人机协同配置
         const hitl = currentConfig.hitl || {};
@@ -2001,22 +1988,6 @@ async function applySettings() {
         const config = {
             ai: currentConfig.ai,
             vision: visionPayload,
-            fofa: {
-                api_key: document.getElementById('fofa-api-key')?.value.trim() || '',
-                base_url: document.getElementById('fofa-base-url')?.value.trim() || ''
-            },
-            zoomeye: {
-                api_key: document.getElementById('zoomeye-api-key')?.value.trim() || '',
-                base_url: document.getElementById('zoomeye-base-url')?.value.trim() || ''
-            },
-            quake: {
-                api_key: document.getElementById('quake-api-key')?.value.trim() || '',
-                base_url: document.getElementById('quake-base-url')?.value.trim() || ''
-            },
-            shodan: {
-                api_key: document.getElementById('shodan-api-key')?.value.trim() || '',
-                base_url: document.getElementById('shodan-base-url')?.value.trim() || ''
-            },
             hitl: {
                 ...prevHitl,
                 audit_model: {

@@ -213,9 +213,6 @@ func newEinoAgenticSummarizationMiddleware(
 				return nil, ferr
 			}
 			out = mergeMessageIntoLeadingSystem(out, userLedger)
-			if appCfg != nil {
-				out = refreshFactIndexInMessages(out, db, projectID, appCfg.Project, logger)
-			}
 			return EinoMessagesToAgentic(out), nil
 		},
 		Callback: func(ctx context.Context, before, after adk.TypedChatModelAgentState[*schema.AgenticMessage]) error {

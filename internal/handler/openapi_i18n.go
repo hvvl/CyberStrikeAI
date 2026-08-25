@@ -9,9 +9,9 @@ var apiDocI18nTagToKey = map[string]string{
 	"角色管理": "roleManagement", "Skills管理": "skillsManagement", "监控": "monitoring",
 	"配置管理": "configManagement", "外部MCP管理": "externalMCPManagement", "攻击链": "attackChain",
 	"知识库": "knowledgeBase", "MCP": "mcp",
-	"FOFA信息收集": "fofaRecon", "终端": "terminal", "WebShell管理": "webshellManagement",
+	"终端": "terminal", "WebShell管理": "webshellManagement",
 	"对话附件": "chatUploads", "机器人集成": "robotIntegration", "多代理Markdown": "markdownAgents",
-	"项目管理": "projectManagement", "资产管理": "assetManagement",
+	"项目管理": "projectManagement",
 }
 
 var apiDocI18nSummaryToKey = map[string]string{
@@ -53,7 +53,7 @@ var apiDocI18nSummaryToKey = map[string]string{
 	"重跑批量任务队列": "rerunBatchQueue", "修改队列元数据": "updateBatchQueueMetadata",
 	"修改队列调度配置": "updateBatchQueueSchedule", "开关Cron自动调度": "setBatchQueueScheduleEnabled",
 	"获取所有分组映射": "getAllGroupMappings",
-	"FOFA搜索":   "fofaSearch", "自然语言解析为FOFA语法": "fofaParse",
+
 	"测试OpenAI API连接": "testOpenAI",
 	"执行终端命令":         "terminalRun", "流式执行终端命令": "terminalRunStream", "WebSocket终端": "terminalWS",
 	"列出WebShell连接": "listWebshellConnections", "创建WebShell连接": "createWebshellConnection",
@@ -73,11 +73,6 @@ var apiDocI18nSummaryToKey = map[string]string{
 	"获取知识库统计":  "getKnowledgeStats",
 	"列出项目":     "listProjects", "创建项目": "createProject", "获取项目": "getProject",
 	"更新项目": "updateProject", "删除项目": "deleteProject",
-	"批量导入资产":        "importAssets",
-	"列出或按 key 获取事实": "listProjectFacts", "创建/更新事实": "upsertProjectFact",
-	"获取项目事实攻击路径图": "getProjectFactGraph", "列出项目全部事实边": "listProjectFactEdges",
-	"添加事实边": "createProjectFactEdge", "删除事实边": "deleteProjectFactEdge",
-	"将对话攻击链沉淀到项目事实图": "promoteAttackChainToProject",
 }
 
 var apiDocI18nResponseDescToKey = map[string]string{
@@ -106,13 +101,7 @@ var apiDocI18nResponseDescToKey = map[string]string{
 	"处理成功": "processSuccess", "代理不存在": "agentNotFound", "保存成功": "saveSuccess",
 	"操作结果": "operationResult", "执行结果": "executionResult", "连接不存在": "connectionNotFound",
 	"项目列表": "projectList", "项目详情": "projectDetail",
-	"事实列表或单条（可含 link_counts / outgoing_links）": "projectFactList",
-	"成功": "success", "nodes + edges": "factGraphNodesEdges",
-	"边列表": "edgeList", "边已创建": "edgeCreated",
-	"沉淀结果（facts/edges/graph）": "promoteAttackChainResult",
-	"导入完成":                    "assetImportCompleted", "数量或资产字段校验失败": "assetImportValidationFailed",
-	"缺少 asset:write 权限或无权访问指定项目": "assetImportForbidden",
-	"导入事务失败": "assetImportTransactionFailed",
+	"成功": "success",
 }
 
 // enrichSpecWithI18nKeys 在 spec 的每个 operation 上写入 x-i18n-tags、x-i18n-summary，

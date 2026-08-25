@@ -377,42 +377,6 @@ func (db *DB) initTables() error {
 		updated_at DATETIME NOT NULL
 	);`
 
-	// 创建项目事实表（黑板）
-	createProjectFactsTable := `
-	CREATE TABLE IF NOT EXISTS project_facts (
-		id TEXT PRIMARY KEY,
-		project_id TEXT NOT NULL,
-		fact_key TEXT NOT NULL,
-		category TEXT NOT NULL DEFAULT 'note',
-		summary TEXT NOT NULL DEFAULT '',
-		body TEXT,
-		confidence TEXT NOT NULL DEFAULT 'tentative',
-		source_conversation_id TEXT,
-		source_message_id TEXT,
-		pinned INTEGER NOT NULL DEFAULT 0,
-		related_vulnerability_id TEXT,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-		UNIQUE(project_id, fact_key)
-	);`
-
-	// 项目事实关系边（黑板 DAG）
-	createProjectFactEdgesTable := `
-	CREATE TABLE IF NOT EXISTS project_fact_edges (
-		id TEXT PRIMARY KEY,
-		project_id TEXT NOT NULL,
-		source_fact_key TEXT NOT NULL,
-		target_fact_key TEXT NOT NULL,
-		edge_type TEXT NOT NULL,
-		confidence TEXT NOT NULL DEFAULT 'tentative',
-		source_conversation_id TEXT,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-		UNIQUE(project_id, source_fact_key, target_fact_key, edge_type)
-	);`
-
 	// 创建漏洞表
 	createVulnerabilitiesTable := `
 	CREATE TABLE IF NOT EXISTS vulnerabilities (
@@ -436,22 +400,6 @@ func (db *DB) initTables() error {
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		project_id TEXT,
 		FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL
-	);`
-
-	createAssetsTable := `
-	CREATE TABLE IF NOT EXISTS assets (
-		id TEXT PRIMARY KEY,
-		dedup_key TEXT NOT NULL UNIQUE, project_id TEXT,
-		host TEXT NOT NULL DEFAULT '', ip TEXT NOT NULL DEFAULT '', port INTEGER NOT NULL DEFAULT 0,
-		domain TEXT NOT NULL DEFAULT '', protocol TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '',
-		server TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT '', province TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '',
-		responsible_person TEXT NOT NULL DEFAULT '', department TEXT NOT NULL DEFAULT '', business_system TEXT NOT NULL DEFAULT '',
-		environment TEXT NOT NULL DEFAULT '', criticality TEXT NOT NULL DEFAULT '',
-		source TEXT NOT NULL DEFAULT 'manual', source_query TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active',
-		vulnerability_count INTEGER NOT NULL DEFAULT 0, risk_score INTEGER NOT NULL DEFAULT 0, risk_level TEXT NOT NULL DEFAULT 'unassessed',
-		tags_json TEXT NOT NULL DEFAULT '[]', first_seen_at DATETIME NOT NULL, last_seen_at DATETIME NOT NULL,
-		created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, owner_user_id TEXT,
-		FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
 	);`
 
 	createVulnerabilityAlertSubscriptionsTable := `
@@ -772,24 +720,8 @@ func (db *DB) initTables() error {
 	CREATE INDEX IF NOT EXISTS idx_vulnerabilities_severity ON vulnerabilities(severity);
 	CREATE INDEX IF NOT EXISTS idx_vulnerabilities_status ON vulnerabilities(status);
 	CREATE INDEX IF NOT EXISTS idx_vulnerabilities_created_at ON vulnerabilities(created_at);
-	CREATE INDEX IF NOT EXISTS idx_assets_last_seen ON assets(last_seen_at);
-	CREATE INDEX IF NOT EXISTS idx_assets_last_scan ON assets(last_scan_at);
-	CREATE INDEX IF NOT EXISTS idx_assets_ip ON assets(ip);
-	CREATE INDEX IF NOT EXISTS idx_assets_domain ON assets(domain);
-	CREATE INDEX IF NOT EXISTS idx_assets_status ON assets(status);
-	CREATE INDEX IF NOT EXISTS idx_assets_owner ON assets(owner_user_id);
-	CREATE INDEX IF NOT EXISTS idx_assets_project ON assets(project_id);
-	CREATE INDEX IF NOT EXISTS idx_assets_vulnerability_count ON assets(vulnerability_count);
-	CREATE INDEX IF NOT EXISTS idx_assets_risk_score ON assets(risk_score);
-	CREATE INDEX IF NOT EXISTS idx_assets_risk_level ON assets(risk_level);
 	CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 	CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at);
-	CREATE INDEX IF NOT EXISTS idx_project_facts_project_id ON project_facts(project_id);
-	CREATE INDEX IF NOT EXISTS idx_project_facts_confidence ON project_facts(confidence);
-	CREATE INDEX IF NOT EXISTS idx_project_facts_related_vuln ON project_facts(related_vulnerability_id);
-	CREATE INDEX IF NOT EXISTS idx_project_fact_edges_project ON project_fact_edges(project_id);
-	CREATE INDEX IF NOT EXISTS idx_project_fact_edges_source ON project_fact_edges(project_id, source_fact_key);
-	CREATE INDEX IF NOT EXISTS idx_project_fact_edges_target ON project_fact_edges(project_id, target_fact_key);
 	CREATE INDEX IF NOT EXISTS idx_conversations_project_id ON conversations(project_id);
 	CREATE INDEX IF NOT EXISTS idx_vulnerabilities_project_id ON vulnerabilities(project_id);
 	CREATE INDEX IF NOT EXISTS idx_batch_tasks_queue_id ON batch_tasks(queue_id);
@@ -885,22 +817,8 @@ func (db *DB) initTables() error {
 		return fmt.Errorf("创建projects表失败: %w", err)
 	}
 
-	if _, err := db.Exec(createProjectFactsTable); err != nil {
-		return fmt.Errorf("创建project_facts表失败: %w", err)
-	}
-
-	if _, err := db.Exec(createProjectFactEdgesTable); err != nil {
-		return fmt.Errorf("创建project_fact_edges表失败: %w", err)
-	}
-
 	if _, err := db.Exec(createVulnerabilitiesTable); err != nil {
 		return fmt.Errorf("创建vulnerabilities表失败: %w", err)
-	}
-	if _, err := db.Exec(createAssetsTable); err != nil {
-		return fmt.Errorf("创建assets表失败: %w", err)
-	}
-	if err := db.migrateAssetsTable(); err != nil {
-		return fmt.Errorf("迁移assets表失败: %w", err)
 	}
 
 	if _, err := db.Exec(createBatchTaskQueuesTable); err != nil {
@@ -994,10 +912,6 @@ func (db *DB) initTables() error {
 	if err := db.migrateProjectsTable(); err != nil {
 		db.logger.Warn("迁移projects相关表失败", zap.Error(err))
 	}
-	if err := db.dropProjectFactVersionsTable(); err != nil {
-		db.logger.Warn("清理project_fact_versions表失败", zap.Error(err))
-	}
-
 	if err := db.migrateWebshellConnectionsTable(); err != nil {
 		db.logger.Warn("迁移webshell_connections表失败", zap.Error(err))
 		// 不返回错误，允许继续运行
@@ -1050,40 +964,6 @@ func (db *DB) migrateToolExecutionsPartialOutputColumns() error {
 	} {
 		if err := db.addColumnIfMissing("tool_executions", col.name, col.stmt); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-// migrateAssetsTable keeps databases created by the first asset-management release compatible.
-func (db *DB) migrateAssetsTable() error {
-	columns := []struct {
-		name string
-		ddl  string
-	}{
-		{"project_id", "ALTER TABLE assets ADD COLUMN project_id TEXT"},
-		{"last_scan_at", "ALTER TABLE assets ADD COLUMN last_scan_at DATETIME"},
-		{"last_scan_conversation_id", "ALTER TABLE assets ADD COLUMN last_scan_conversation_id TEXT NOT NULL DEFAULT ''"},
-		{"last_scan_queue_id", "ALTER TABLE assets ADD COLUMN last_scan_queue_id TEXT NOT NULL DEFAULT ''"},
-		{"last_scan_task_id", "ALTER TABLE assets ADD COLUMN last_scan_task_id TEXT NOT NULL DEFAULT ''"},
-		{"responsible_person", "ALTER TABLE assets ADD COLUMN responsible_person TEXT NOT NULL DEFAULT ''"},
-		{"department", "ALTER TABLE assets ADD COLUMN department TEXT NOT NULL DEFAULT ''"},
-		{"business_system", "ALTER TABLE assets ADD COLUMN business_system TEXT NOT NULL DEFAULT ''"},
-		{"environment", "ALTER TABLE assets ADD COLUMN environment TEXT NOT NULL DEFAULT ''"},
-		{"criticality", "ALTER TABLE assets ADD COLUMN criticality TEXT NOT NULL DEFAULT ''"},
-		{"vulnerability_count", "ALTER TABLE assets ADD COLUMN vulnerability_count INTEGER NOT NULL DEFAULT 0"},
-		{"risk_score", "ALTER TABLE assets ADD COLUMN risk_score INTEGER NOT NULL DEFAULT 0"},
-		{"risk_level", "ALTER TABLE assets ADD COLUMN risk_level TEXT NOT NULL DEFAULT 'unassessed'"},
-	}
-	for _, column := range columns {
-		var count int
-		if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('assets') WHERE name=?", column.name).Scan(&count); err != nil {
-			return err
-		}
-		if count == 0 {
-			if _, err := db.Exec(column.ddl); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
@@ -1564,12 +1444,6 @@ func (db *DB) migrateProjectsTable() error {
 		}
 	}
 	return nil
-}
-
-// dropProjectFactVersionsTable 移除已废弃的事实版本归档表。
-func (db *DB) dropProjectFactVersionsTable() error {
-	_, err := db.Exec(`DROP TABLE IF EXISTS project_fact_versions`)
-	return err
 }
 
 // migrateVulnerabilitiesConversationFK 将 vulnerabilities.conversation_id 外键改为 ON DELETE SET NULL，删除对话时保留漏洞记录。

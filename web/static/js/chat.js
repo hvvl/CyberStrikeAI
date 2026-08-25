@@ -162,7 +162,7 @@ const DEFAULT_HITL_TIMEOUT_SECONDS = 300;
 // Agent orchestration/control tools are safe baseline exemptions for every
 // conversation. Keep this separate from config.tool_whitelist: the latter is
 // enforced globally by the backend and must not be copied into this field.
-const DEFAULT_HITL_SESSION_TOOL_WHITELIST = 'tool_search, skill, task, write_todos, transfer_to_agent, exit, TaskCreate, TaskGet, TaskUpdate, TaskList, upsert_project_fact, get_project_fact';
+const DEFAULT_HITL_SESSION_TOOL_WHITELIST = 'tool_search, skill, task, write_todos, transfer_to_agent, exit, TaskCreate, TaskGet, TaskUpdate, TaskList';
 let hitlApplyFeedbackTimer = null;
 let hitlAutoSaveTimer = null;
 let hitlConfigSyncConversationId = '';

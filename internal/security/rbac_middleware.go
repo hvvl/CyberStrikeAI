@@ -153,10 +153,6 @@ func permissionForRequest(method, fullPath string) string {
 		return crudPermission(method, "knowledge")
 	case strings.HasPrefix(path, "/vulnerabilities"):
 		return crudPermission(method, "vulnerability")
-	case path == "/assets/batch-delete", path == "/assets/merge":
-		return "asset:delete"
-	case strings.HasPrefix(path, "/assets"):
-		return crudPermission(method, "asset")
 	case strings.HasPrefix(path, "/vulnerability-alerts"):
 		// This endpoint only changes the authenticated user's own preference.
 		return "vulnerability:read"
@@ -185,8 +181,6 @@ func permissionForRequest(method, fullPath string) string {
 		return crudPermission(method, "skills")
 	case strings.HasPrefix(path, "/openapi"):
 		return "openapi:read"
-	case strings.HasPrefix(path, "/fofa"):
-		return "fofa:execute"
 	default:
 		return ""
 	}
@@ -240,8 +234,6 @@ func resourceAllowed(c *gin.Context, db *database.DB) bool {
 		return db.UserCanAccessResource(session.UserID, session.Scope, "batch_task", c.Param("queueId"))
 	case strings.HasPrefix(path, "/vulnerabilities/:id"):
 		return db.UserCanAccessResource(session.UserID, session.Scope, "vulnerability", c.Param("id"))
-	case strings.HasPrefix(path, "/assets/:id"):
-		return db.UserCanAccessResource(session.UserID, session.Scope, "asset", c.Param("id"))
 	case strings.HasPrefix(path, "/c2/listeners/:id"):
 		return db.UserCanAccessResource(session.UserID, session.Scope, "c2_listener", c.Param("id"))
 	case strings.HasPrefix(path, "/c2/sessions/:id"):

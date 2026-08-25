@@ -46,9 +46,7 @@ func TestMergeHitlExemptMetaTools_includesBuiltInExemptTools(t *testing.T) {
 		t.Fatalf("tool_search missing from %v", merged)
 	}
 	foundBuiltInTools := map[string]bool{
-		"write_file":          false,
-		"upsert_project_fact": false,
-		"get_project_fact":    false,
+		"write_file": false,
 	}
 	for _, name := range merged {
 		normalized := strings.ToLower(strings.TrimSpace(name))

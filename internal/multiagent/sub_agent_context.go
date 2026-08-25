@@ -32,7 +32,7 @@ type taskContextEnrichMiddleware struct {
 // newTaskContextEnrichMiddleware returns a middleware that enriches task
 // descriptions with user conversation context. Returns nil if disabled
 // (maxRunes < 0) or no user messages exist.
-// projectBlackboard 仅传项目黑板索引块（BuildFactIndexBlock）；勿传完整 systemPromptExtra。
+// projectBlackboard 保留参数兼容（黑板机制已移除，生产恒传空串）。
 func newTaskContextEnrichMiddleware(userMessage string, history []agent.ChatMessage, maxRunes int, projectBlackboard string) adk.ChatModelAgentMiddleware {
 	supplement := buildUserContextSupplement(userMessage, history, maxRunes)
 	if bb := strings.TrimSpace(projectBlackboard); bb != "" {
