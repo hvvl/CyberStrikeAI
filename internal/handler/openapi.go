@@ -607,7 +607,7 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 								"delimiter":       map[string]interface{}{"type": "string", "description": "分隔符，默认 ,"},
 								"skipHeader":      map[string]interface{}{"type": "boolean", "description": "忽略首行表头"},
 								"encoding":        map[string]interface{}{"type": "string", "enum": []string{"utf-8", "gbk"}, "description": "编码，默认 utf-8"},
-								"emptyCellPolicy": map[string]interface{}{"type": "string", "enum": []string{"skip_row", "keep"}, "description": "空单元格策略，默认 skip_row"},
+								"emptyCellPolicy": map[string]interface{}{"type": "string", "enum": []string{"skip_row", "keep"}, "description": "空单元格策略，默认 keep（保留该行、空值填空）；skip_row 表示任一映射列为空即跳过该行，需显式选择"},
 							},
 						},
 						"queues": map[string]interface{}{
@@ -2118,6 +2118,18 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 					},
 				},
 			},
+			"/api/batch-tasks/resume-interrupted": map[string]interface{}{
+				"post": map[string]interface{}{
+					"tags":        []string{"批量任务"},
+					"summary":     "一键继续所有中断队列",
+					"description": "启动所有 paused（含启动恢复回滚的、手工暂停的）与 pending 队列；跳过 running、completed/cancelled、等待 Cron 定时触发的 pending 队列；逐队列 RBAC 校验（单个无权计入 skipped）",
+					"operationId": "resumeInterruptedBatchQueues",
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "返回 started / skipped 计数"},
+						"401": map[string]interface{}{"description": "未授权"},
+					},
+				},
+			},
 			"/api/batch-tasks/group/{groupId}/start": map[string]interface{}{
 				"post": map[string]interface{}{
 					"tags":        []string{"批量任务"},
@@ -2157,6 +2169,28 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 					},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{"description": "取消完成（返回 cancelled 计数）"},
+						"404": map[string]interface{}{"description": "派发组不存在或无队列"},
+						"401": map[string]interface{}{"description": "未授权"},
+					},
+				},
+			},
+			"/api/batch-tasks/group/{groupId}/pause": map[string]interface{}{
+				"post": map[string]interface{}{
+					"tags":        []string{"批量任务"},
+					"summary":     "暂停派发组全部队列",
+					"description": "暂停同一 CSV 派发批次下所有 running 队列（组级一键暂停；单队列暂停用 /api/batch-tasks/{queueId}/pause）",
+					"operationId": "pauseBatchGroup",
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "groupId",
+							"in":          "path",
+							"required":    true,
+							"description": "派发组 ID",
+							"schema":      map[string]interface{}{"type": "string"},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "暂停完成（返回 paused 计数）"},
 						"404": map[string]interface{}{"description": "派发组不存在或无队列"},
 						"401": map[string]interface{}{"description": "未授权"},
 					},

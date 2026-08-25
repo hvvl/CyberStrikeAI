@@ -840,8 +840,11 @@ const batchQueuesState = {
     totalPages: 1
 };
 
-async function refreshBatchProjectSelectOptions() {
-    const projectSelect = document.getElementById('batch-queue-project-id');
+// fillBatchProjectSelect 通用项目下拉填充：手动创建弹窗(batch-queue-project-id)
+// 与 CSV 派发弹窗(batch-dispatch-project-id)共用。此前 CSV 派发下拉从未被填充，
+// 提交时 projectId 恒为空导致队列「所属项目」永远显示(未绑定)。
+async function fillBatchProjectSelect(selectId) {
+    const projectSelect = document.getElementById(selectId);
     if (!projectSelect) return;
 
     const noneLabel = _t('batchImportModal.projectNone');
@@ -876,6 +879,11 @@ async function refreshBatchProjectSelectOptions() {
     } catch (error) {
         console.warn('加载项目列表失败:', error);
     }
+}
+
+// 兼容旧调用点：手动创建弹窗的项目下拉刷新。
+async function refreshBatchProjectSelectOptions() {
+    await fillBatchProjectSelect('batch-queue-project-id');
 }
 
 // 显示新建任务模态框
@@ -1663,6 +1671,8 @@ function renderBatchQueues() {
                         </div>
                     </div>
                     <div class="batch-queue-item__actions-col" onclick="event.stopPropagation();">
+                        ${(queue.batchGroupId && queue.status === 'running') ? `<button type="button" class="batch-queue-icon-btn" onclick="pauseBatchDispatchGroup(${escapeJsStringAttr(queue.batchGroupId)})" title="${escapeHtml(_t('batchDispatchModal.groupPauseBtn'))}" aria-label="${escapeHtml(_t('batchDispatchModal.groupPauseBtn'))}"><svg class="batch-queue-icon-btn__svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="6" width="3" height="12" rx="0.5"/><rect x="13" y="6" width="3" height="12" rx="0.5"/></svg></button>` : ''}
+                        ${(queue.status === 'running') ? `<button type="button" class="batch-queue-icon-btn" onclick="pauseBatchQueue(${escapeJsStringAttr(queue.id)})" title="${escapeHtml(_t('tasks.pauseQueueBtnTitle'))}" aria-label="${escapeHtml(_t('tasks.pauseQueueBtnTitle'))}"><svg class="batch-queue-icon-btn__svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="10" y1="6" x2="10" y2="18"/><line x1="14" y1="6" x2="14" y2="18"/></svg></button>` : ''}
                         ${(queue.batchGroupId && (queue.status === 'running' || queue.status === 'paused')) ? `<button type="button" class="batch-queue-icon-btn batch-queue-icon-btn--danger" onclick="cancelBatchDispatchGroup(${escapeJsStringAttr(queue.batchGroupId)})" title="${escapeHtml(_t('batchDispatchModal.groupCancelBtn'))}" aria-label="${escapeHtml(_t('batchDispatchModal.groupCancelBtn'))}"><svg class="batch-queue-icon-btn__svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>` : ''}
                         <button type="button" class="batch-queue-icon-btn" onclick="navigateToVulnerabilitiesFromTasksPage('queue', ${escapeJsStringAttr(queue.id)})" title="${escapeHtml(_t('tasks.viewVulnerabilitiesQueueTitle'))}" aria-label="${escapeHtml(_t('tasks.viewVulnerabilitiesQueueTitle'))}"><svg class="batch-queue-icon-btn__svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg></button>
                         ${canDelete ? `<button type="button" class="batch-queue-icon-btn batch-queue-icon-btn--danger" onclick="deleteBatchQueueFromList(${escapeJsStringAttr(queue.id)})" title="${escapeHtml(_t('tasks.deleteQueue'))}" aria-label="${escapeHtml(_t('tasks.deleteQueue'))}"><svg class="batch-queue-icon-btn__svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>` : ''}
@@ -2011,15 +2021,16 @@ async function startBatchQueue() {
 }
 
 // 暂停批量任务队列
-async function pauseBatchQueue() {
-    const queueId = batchQueuesState.currentQueueId;
+// 传参 queueId 时用于列表行内按钮；缺省时沿用详情弹窗的当前队列（向后兼容）。
+async function pauseBatchQueue(queueIdArg) {
+    const queueId = queueIdArg || batchQueuesState.currentQueueId;
     if (!queueId) return;
 
     if (!confirm(_t('tasks.pauseQueueConfirm'))) {
         return;
     }
     const btn = document.getElementById('batch-queue-pause-btn');
-    if (btn) { btn.disabled = true; }
+    if (btn && !queueIdArg) { btn.disabled = true; }
     try {
         const response = await apiFetch(`/api/batch-tasks/${queueId}/pause`, {
             method: 'POST',
@@ -2984,6 +2995,8 @@ async function ensureBatchDispatchOptionData() {
     await Promise.all(jobs);
     // 异步加载完成后，刷新已存在的队列行的通道/角色下拉选项（保留已选值）。
     refreshBatchDispatchQueueRowOptions();
+    // CSV 派发弹窗的所属项目下拉同样需要填充（修复其恒为空的「未绑定」问题）。
+    fillBatchProjectSelect('batch-dispatch-project-id');
 }
 
 function buildBatchDispatchChannelOptions() {
@@ -3239,6 +3252,7 @@ function collectBatchDispatchPayload() {
     });
     const skipEl = document.getElementById('batch-csv-skip-header');
     const delimEl = document.getElementById('batch-csv-delimiter');
+    const emptyPolicyEl = document.getElementById('batch-csv-empty-policy');
     const modeEl = document.getElementById('batch-dispatch-mode');
     const execEl = document.getElementById('batch-dispatch-execute-now');
     const projectEl = document.getElementById('batch-dispatch-project-id');
@@ -3255,7 +3269,8 @@ function collectBatchDispatchPayload() {
             // 服务端收到的是 UTF-8 JSON，必须声明 utf-8，否则 GBK 文件会被二次解码。
             // 后端的 gbk 支持仅服务于 MCP/API 直接传入原始 GBK 字节字符串的场景。
             encoding: 'utf-8',
-            emptyCellPolicy: 'skip_row'
+            // 空单元格策略由用户显式选择；默认 keep（保留该行），避免稀疏清单被静默丢弃。
+            emptyCellPolicy: emptyPolicyEl ? (emptyPolicyEl.value || 'keep') : 'keep'
         },
         queues: queues,
         distributeMode: modeEl ? modeEl.value : 'block',
@@ -3333,6 +3348,48 @@ async function cancelBatchDispatchGroup(groupId) {
     }
 }
 
+// 组级一键暂停：暂停整个派发组内所有 running 队列（与单队列暂停是两个功能）。
+async function pauseBatchDispatchGroup(groupId) {
+    if (typeof requirePermission === 'function' && !requirePermission('tasks:write')) return;
+    if (!confirm(_t('batchDispatchModal.confirmGroupPause'))) return;
+    try {
+        const response = await apiFetch('/api/batch-tasks/group/' + encodeURIComponent(groupId) + '/pause', { method: 'POST' });
+        if (!response.ok) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.error || _t('batchDispatchModal.groupPauseFailed'));
+        }
+        const result = await response.json();
+        alert(_t('batchDispatchModal.groupPauseSuccess', { n: result.paused || 0 }));
+        refreshBatchQueues();
+    } catch (error) {
+        console.error('暂停派发组失败:', error);
+        alert(_t('batchDispatchModal.groupPauseFailed') + ': ' + error.message);
+    }
+}
+
+// 一键继续所有意外停止的任务队列（进程崩溃/重启后的批量恢复）。
+async function resumeInterruptedBatchQueues() {
+    if (typeof requirePermission === 'function' && !requirePermission('tasks:write')) return;
+    if (!confirm(_t('tasks.resumeInterruptedConfirm'))) return;
+    const btn = document.getElementById('tasks-resume-interrupted-btn');
+    if (btn) { btn.disabled = true; }
+    try {
+        const response = await apiFetch('/api/batch-tasks/resume-interrupted', { method: 'POST' });
+        if (!response.ok) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.error || _t('tasks.resumeInterruptedFailed'));
+        }
+        const result = await response.json();
+        alert(_t('tasks.resumeInterruptedSuccess', { started: result.started || 0, skipped: result.skipped || 0 }));
+        refreshBatchQueues();
+    } catch (error) {
+        console.error('继续中断队列失败:', error);
+        alert(_t('tasks.resumeInterruptedFailed') + ': ' + error.message);
+    } finally {
+        if (btn) { btn.disabled = false; }
+    }
+}
+
 // 导出函数
 window.showBatchImportModal = showBatchImportModal;
 window.closeBatchImportModal = closeBatchImportModal;
@@ -3381,6 +3438,8 @@ window.batchDispatchMapColChanged = batchDispatchMapColChanged;
 window.addBatchDispatchQueueRow = addBatchDispatchQueueRow;
 window.removeBatchDispatchQueueRow = removeBatchDispatchQueueRow;
 window.cancelBatchDispatchGroup = cancelBatchDispatchGroup;
+window.pauseBatchDispatchGroup = pauseBatchDispatchGroup;
+window.resumeInterruptedBatchQueues = resumeInterruptedBatchQueues;
 
 // 语言切换后，列表/分页/详情弹窗由 JS 渲染的文案需用当前语言重绘（applyTranslations 不会处理 innerHTML 内容）
 document.addEventListener('languagechange', function () {

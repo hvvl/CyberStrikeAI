@@ -86,9 +86,11 @@ type BatchDispatchResponse struct {
 	Queues      []BatchDispatchQueueResult `json:"queues"`
 }
 
-// normalizeBatchDispatch 填充默认值：delimiter=,、encoding=utf-8、policy=skip_row、mode=block、
+// normalizeBatchDispatch 填充默认值：delimiter=,、encoding=utf-8、policy=keep、mode=block、
 // skip_header=true（审计四轮 #5：与 MCP 入口默认一致，避免 HTTP 漏传时把表头当数据行）；
 // 队列并发数规范化、AgentMode 归一化。
+// 空单元格默认 keep（保留该行、空值填空）：skip_row 会静默丢弃含稀疏列的行，
+// 对无备注/标题的资产清单会大量丢任务，丢弃必须显式选择。
 func normalizeBatchDispatch(req *BatchDispatchRequest) {
 	if req.CSV.Delimiter == "" {
 		req.CSV.Delimiter = ","
@@ -97,7 +99,7 @@ func normalizeBatchDispatch(req *BatchDispatchRequest) {
 		req.CSV.Encoding = "utf-8"
 	}
 	if req.CSV.EmptyCellPolicy == "" {
-		req.CSV.EmptyCellPolicy = "skip_row"
+		req.CSV.EmptyCellPolicy = "keep"
 	}
 	if req.CSV.SkipHeader == nil {
 		t := true
@@ -502,6 +504,34 @@ func (h *AgentHandler) StartBatchGroup(c *gin.Context) {
 		h.audit.RecordOK(c, "task", "start_group", "启动批量派发组", "batch_group", groupID, map[string]interface{}{"started": started, "total": len(ids)})
 	}
 	c.JSON(http.StatusOK, gin.H{"groupId": groupID, "started": started})
+}
+
+// PauseBatchGroup 暂停派发组内所有 running 队列。
+// 与单队列暂停（PauseBatchQueue）是两个功能：组级一键暂停整批，循环复用 PauseQueue；
+// RBAC 与审计对齐 StartBatchGroup/CancelBatchGroup 的「全有或全无」策略。
+func (h *AgentHandler) PauseBatchGroup(c *gin.Context) {
+	groupID := c.Param("groupId")
+	ids, err := h.db.ListBatchQueueIDsByGroup(groupID)
+	if err != nil || len(ids) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "派发组不存在或无队列"})
+		return
+	}
+	if !h.checkBatchGroupAccess(c, ids) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "无权操作该派发组"})
+		return
+	}
+	paused := 0
+	for _, id := range ids {
+		if _, ok := h.batchTaskManager.GetBatchQueue(id); ok {
+			if h.batchTaskManager.PauseQueue(id) {
+				paused++
+			}
+		}
+	}
+	if h.audit != nil {
+		h.audit.RecordOK(c, "task", "pause_group", "暂停批量派发组", "batch_group", groupID, map[string]interface{}{"paused": paused, "total": len(ids)})
+	}
+	c.JSON(http.StatusOK, gin.H{"groupId": groupID, "paused": paused})
 }
 
 // CancelBatchGroup 取消派发组内所有 running/paused 队列。

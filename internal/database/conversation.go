@@ -954,6 +954,19 @@ func (db *DB) SaveAgentTrace(conversationID, traceInputJSON, assistantOutput str
 	return nil
 }
 
+// ClearAgentTrace 清除会话保存的代理轨迹（last_react_* 置 NULL）。
+// 用于取消路径：本轮未累积新轨迹时清掉旧一轮轨迹，避免下次加载命中过期轨迹。
+func (db *DB) ClearAgentTrace(conversationID string) error {
+	_, err := db.Exec(
+		"UPDATE conversations SET last_react_input = NULL, last_react_output = NULL, updated_at = ? WHERE id = ?",
+		time.Now(), conversationID,
+	)
+	if err != nil {
+		return fmt.Errorf("清除代理轨迹失败: %w", err)
+	}
+	return nil
+}
+
 // GetAgentTrace 读取 conversations 中保存的代理轨迹（列名 last_react_*）。
 func (db *DB) GetAgentTrace(conversationID string) (traceInputJSON, assistantOutput string, err error) {
 	var input, output sql.NullString

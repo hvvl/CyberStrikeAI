@@ -333,6 +333,13 @@ func (h *AgentHandler) EinoSingleAgentLoopStream(c *gin.Context) {
 			h.persistEinoAgentTraceForResume(conversationID, result)
 		}
 		if errors.Is(cause, ErrTaskCancelled) {
+			// 取消时若本轮未留下新轨迹，清除旧一轮轨迹：否则过期轨迹"占坑"，
+			// 下次加载命中它而绕过 messages 表，模型丢失被停止那一轮的上下文。
+			if result == nil || (result.LastAgentTraceInput == "" && result.LastAgentTraceOutput == "") {
+				if err := h.db.ClearAgentTrace(conversationID); err != nil {
+					h.logger.Warn("清除取消会话的过期代理轨迹失败", zap.String("conversationId", conversationID), zap.Error(err))
+				}
+			}
 			taskStatus = "cancelled"
 			h.tasks.UpdateTaskStatus(conversationID, taskStatus)
 			cancelMsg := "任务已被用户取消，后续操作已停止。"

@@ -347,6 +347,12 @@ func (h *AgentHandler) MultiAgentLoopStream(c *gin.Context) {
 			h.persistEinoAgentTraceForResume(conversationID, result)
 		}
 		if errors.Is(cause, ErrTaskCancelled) {
+			// 与单代理路径同构：取消时本轮无新轨迹则清掉旧轨迹，避免过期轨迹占坑。
+			if result == nil || (result.LastAgentTraceInput == "" && result.LastAgentTraceOutput == "") {
+				if err := h.db.ClearAgentTrace(conversationID); err != nil {
+					h.logger.Warn("清除取消会话的过期代理轨迹失败", zap.String("conversationId", conversationID), zap.Error(err))
+				}
+			}
 			taskStatus = "cancelled"
 			h.tasks.UpdateTaskStatus(conversationID, taskStatus)
 			cancelMsg := "任务已被用户取消，后续操作已停止。"

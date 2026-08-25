@@ -678,7 +678,7 @@ schedule_mode 为 cron 时必须提供有效 cron_expr；为 manual 时会清除
 		Name: builtin.ToolBatchDispatch,
 		Description: `【用途】CSV 批量派发：读取 CSV 资产清单（如空间测绘引擎导出的 host,port,title 等），用提示词模板中的 {{占位符}} 逐行渲染消息，并按队列计划拆分为多个批量任务队列（每队列可独立指定 AI 通道/代理模式/角色），队列间并行、队列内按并发数执行。
 
-【参数】template（必填，含 {{name}} 占位符）；placeholders（必填，JSON 数组，如 [{"name":"target","column":1}]，列号 1 起始）；csv_content（必填，CSV 原文）；queues（必填，JSON 数组，每项 {"title","ai_channel_id","agent_mode","role","concurrency","task_count"}，task_count 为分块模式封顶、0=承接剩余）。可选：csv_encoding（utf-8/gbk）、csv_delimiter（, ; tab）、skip_header（默认 true）、empty_cell_policy（skip_row/keep）、distribute_mode（block 默认 / round_robin）、execute_now、project_id。
+【参数】template（必填，含 {{name}} 占位符）；placeholders（必填，JSON 数组，如 [{"name":"target","column":1}]，列号 1 起始）；csv_content（必填，CSV 原文）；queues（必填，JSON 数组，每项 {"title","ai_channel_id","agent_mode","role","concurrency","task_count"}，task_count 为分块模式封顶、0=承接剩余）。可选：csv_encoding（utf-8/gbk）、csv_delimiter（, ; tab）、skip_header（默认 true）、empty_cell_policy（keep 默认 / skip_row）、distribute_mode（block 默认 / round_robin）、execute_now、project_id。
 
 【返回】group_id、total_tasks、skipped_rows、queues[{queue_id,task_count,started}]。`,
 		ShortDescription: "CSV批量派发：模板占位符渲染资产清单并拆分为多队列",
@@ -720,7 +720,7 @@ schedule_mode 为 cron 时必须提供有效 cron_expr；为 manual 时会清除
 				},
 				"empty_cell_policy": map[string]interface{}{
 					"type":        "string",
-					"description": "映射列为空时的处理：skip_row（跳过该行，默认）或 keep（替换为空串）",
+					"description": "映射列为空时的处理：keep（保留该行、替换为空串，默认）或 skip_row（跳过该行）",
 					"enum":        []string{"skip_row", "keep"},
 				},
 				"distribute_mode": map[string]interface{}{

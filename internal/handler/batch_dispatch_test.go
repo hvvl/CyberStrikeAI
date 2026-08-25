@@ -207,7 +207,8 @@ func TestDistributeDefaultModeIsBlock(t *testing.T) {
 	if req.DistributeMode != "block" {
 		t.Fatalf("default mode should be block, got %q", req.DistributeMode)
 	}
-	if req.CSV.Delimiter != "," || req.CSV.Encoding != "utf-8" || req.CSV.EmptyCellPolicy != "skip_row" {
+	// 空单元格默认 keep：skip_row 会静默丢弃稀疏行，丢弃必须显式选择。
+	if req.CSV.Delimiter != "," || req.CSV.Encoding != "utf-8" || req.CSV.EmptyCellPolicy != "keep" {
 		t.Fatalf("defaults wrong: %+v", req.CSV)
 	}
 	// 审计四轮 #5：HTTP 漏传 skipHeader 时默认 true（忽略表头），与 MCP 入口一致。

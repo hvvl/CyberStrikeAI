@@ -14,7 +14,10 @@ bloodhound>=1.6.1
 impacket>=0.11.0
 
 # MCP (Model Context Protocol) SDK
-mcp>=1.0.0
+# 注意：mcp 2.x 移除了 mcp.server.fastmcp（拆分为独立的 fastmcp 包），
+# mcp-servers/pent_claude_agent 与 mcp-servers/reverse_shell 仍从旧路径导入，
+# pip 解析到 2.x 会直接 ModuleNotFoundError，故锁定 <2（部署环境按 1.29.0 验证）。
+mcp>=1.0.0,<2
 
 # Captcha OCR (fork enhancement: captcha recognition tool)
 ddddocr>=1.5.6

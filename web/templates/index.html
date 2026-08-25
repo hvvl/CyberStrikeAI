@@ -2870,6 +2870,7 @@
                         <h2 data-i18n="tasks.title">任务管理</h2>
                         <div class="page-header-actions">
                             <button class="btn-primary" data-require-permission="tasks:write" onclick="showBatchImportModal()" data-i18n="tasks.newTask">新建任务</button>
+                            <button class="btn-secondary" data-require-permission="tasks:write" id="tasks-resume-interrupted-btn" onclick="resumeInterruptedBatchQueues()" data-i18n="tasks.resumeInterruptedBtn">继续所有中断队列</button>
                             <label class="auto-refresh-toggle">
                                 <input type="checkbox" id="tasks-auto-refresh" checked onchange="toggleTasksAutoRefresh(this.checked)">
                                 <span data-i18n="tasks.autoRefresh">自动刷新</span>
@@ -6308,6 +6309,13 @@
                                 <input type="checkbox" id="batch-csv-skip-header" checked onchange="batchDispatchCsvSettingsChanged()" />
                                 <span data-i18n="batchDispatchModal.skipHeader">忽略首行（表头）</span>
                             </label>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="batch-csv-empty-policy" data-i18n="batchDispatchModal.emptyCellPolicy">空单元格</label>
+                            <select id="batch-csv-empty-policy">
+                                <option value="keep" data-i18n="batchDispatchModal.emptyCellKeep">保留该行（填空）</option>
+                                <option value="skip_row" data-i18n="batchDispatchModal.emptyCellSkip">跳过该行</option>
+                            </select>
                         </div>
                     </div>
                     <div class="form-group">
