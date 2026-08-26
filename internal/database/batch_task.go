@@ -575,6 +575,21 @@ func (db *DB) RecoverInterruptedBatchTasks(queueID string) error {
 	return nil
 }
 
+// RecoverStaleBatchTask 运行期自愈（内存修复 H3）：把单条超龄 running 子任务回滚为
+// pending（清空 started_at/completed_at/error），使其可被重新认领。
+// 只回滚 started_at 早于 cutoff 且仍为 running 的行；影响行数为 0 视为无需处理。
+func (db *DB) RecoverStaleBatchTask(queueID, taskID string, cutoff time.Time) (bool, error) {
+	res, err := db.Exec(
+		"UPDATE batch_tasks SET status = ?, started_at = NULL, completed_at = NULL, error = NULL WHERE queue_id = ? AND id = ? AND status = ? AND started_at IS NOT NULL AND started_at < ?",
+		"pending", queueID, taskID, "running", cutoff,
+	)
+	if err != nil {
+		return false, fmt.Errorf("回滚超龄 running 任务失败: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // PrepareBatchSingleTaskRun 准备单条执行：可选重置子任务，并更新队列索引与状态
 func (db *DB) PrepareBatchSingleTaskRun(queueID, taskID string, taskIndex int, resetTask, resumeQueue bool) error {
 	tx, err := db.Begin()

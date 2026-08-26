@@ -132,6 +132,19 @@ func (h *AgentHandler) executeOneBatchSubTask(queueID string, queue *BatchTaskQu
 
 	h.batchTaskManager.UpdateTaskStatusWithConversationID(queueID, task.ID, BatchTaskStatusRunning, "", "", conversationID)
 
+	// 内存修复 H1 兜底：executeOneBatchSubTask 分支众多，任何提前 return 路径若
+	// 遗漏终态写入，任务将永远卡在 running（HasRunningTasks 永真 → worker 空转、
+	// 队列无法收尾）。正常路径已写终态时此处不动作。
+	defer func() {
+		if h.batchTaskManager.TaskStatus(queueID, task.ID) == BatchTaskStatusRunning {
+			h.logger.Error("批量子任务退出时仍为 running，兜底落 failed",
+				zap.String("queueId", queueID),
+				zap.String("taskId", task.ID),
+				zap.String("conversationId", conversationID))
+			h.batchTaskManager.UpdateTaskStatus(queueID, task.ID, BatchTaskStatusFailed, "", "内部错误：执行路径未落终态（兜底）")
+		}
+	}()
+
 	finalMessage := task.Message
 	var roleTools []string
 	if queue.Role != "" && queue.Role != "默认" {

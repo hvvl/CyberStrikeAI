@@ -178,19 +178,37 @@ func functionToolResultToMessage(result *schema.FunctionToolResult) *schema.Mess
 	}
 }
 
-// cloneAnyMap 拷贝业务自定义 Extra key；跳过 `_eino` 前缀的库内部元数据 key。
-// 背景（内存修复 G，pprof heap 实测）：agenticopenai 给每个流式 chunk 的 Extra 塞
-// _eino_ext_agenticopenai_chat_response_meta_ext 等元数据，本函数对每个 chunk 再做
-// 一次 map 拷贝——cloneAnyMap 一度 834MB/328 万对象为堆 TOP1；而全仓对 `.Extra[`
-// 的业务读取点为零（唯一接触点是 builder 写 cyberstrike_ 前缀的标记，不带 _eino）。
-// 纯库内部 key 的 map 直接返回 nil；业务 key（无此前缀）照常拷贝、行为不变。
+// skipExtraKeyPrefixes 库内部 Extra 元数据 key 的前缀集合（内存修复 G）。
+//   - `_eino`：agenticopenai 给每个流式 chunk 写的 _eino_ext_agenticopenai_chat_response_meta_ext 等；
+//   - `openai-` / `openai_`：上游 eino-ext/libs/acl/openai 的 message_extra.go 写的
+//     openai-request-id（keyOfRequestID）、openai-audio-id、openai_audio-transcript 等。
+//
+// 首版只挡 `_eino` 前缀，14 小时真实使用后 cloneAnyMap 又涨回 0.75GB——`openai-*`
+// 一族逃过了白名单，故改为常量前缀集合。业务自定义 key 不得使用这些前缀。
+var skipExtraKeyPrefixes = [...]string{"_eino", "openai-", "openai_"}
+
+func extraKeyIsLibraryMeta(key string) bool {
+	for _, prefix := range skipExtraKeyPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// cloneAnyMap 拷贝业务自定义 Extra key；跳过库内部元数据 key（见 skipExtraKeyPrefixes）。
+// 背景（内存修复 G，pprof heap 实测）：上游库给每个流式 chunk 的 Extra 塞元数据，
+// 本函数对每个 chunk 再做一次 map 拷贝——cloneAnyMap 一度 834MB/328 万对象为堆 TOP1；
+// 而全仓对 `.Extra[` 的业务读取点为零（唯一接触点是 builder 写 cyberstrike_ 前缀的
+// 标记，不带这些库前缀）。纯库内部 key 的 map 直接返回 nil；业务 key 照常拷贝、
+// 行为不变。业务自定义 key 约定不得使用 skipExtraKeyPrefixes 中的前缀。
 func cloneAnyMap(in map[string]any) map[string]any {
 	if len(in) == 0 {
 		return nil
 	}
 	var out map[string]any
 	for k, v := range in {
-		if strings.HasPrefix(k, "_eino") {
+		if extraKeyIsLibraryMeta(k) {
 			continue
 		}
 		if out == nil {

@@ -714,12 +714,22 @@ func (m *BatchTaskManager) UpdateTaskStatusWithConversationID(queueID, taskID, s
 		return
 	}
 
-	// DB 优先：先持久化，成功后再更新内存，避免重启后状态不一致
+	// DB 优先：先持久化，成功后再更新内存，避免重启后状态不一致。
+	// 内存修复 H2：SQLite 偶发 busy/锁导致写失败时，原实现直接放弃（仅 Warn 不更新
+	// 内存）——完成时刻写失败会让任务永久卡在 running。改为：失败 sleep 100ms 重试
+	// 一次；仍失败则同步更新内存（内存/DB 短暂不一致由启动恢复与运行期自愈兜底，
+	// 优于永久卡死）。
 	if m.db != nil {
-		if err := m.db.UpdateBatchTaskStatus(queueID, taskID, status, conversationID, result, errorMsg); err != nil {
-			m.logger.Warn("batch task DB status update failed, skipping memory update",
+		err := m.db.UpdateBatchTaskStatus(queueID, taskID, status, conversationID, result, errorMsg)
+		if err != nil {
+			m.logger.Warn("batch task DB status update failed, retrying once",
 				zap.String("queueId", queueID), zap.String("taskId", taskID), zap.Error(err))
-			return
+			time.Sleep(100 * time.Millisecond)
+			err = m.db.UpdateBatchTaskStatus(queueID, taskID, status, conversationID, result, errorMsg)
+			if err != nil {
+				m.logger.Error("batch task DB status update failed twice, syncing memory only",
+					zap.String("queueId", queueID), zap.String("taskId", taskID), zap.Error(err))
+			}
 		}
 	}
 
@@ -1283,6 +1293,23 @@ func (m *BatchTaskManager) ClaimNextPendingTask(queueID string) (*BatchTask, boo
 	return nil, false
 }
 
+// TaskStatus 只读查询子任务状态（内存修复 H1 兜底 defer 依赖）。
+// 不存在返回空串；调用方据此判断任务是否已落终态。
+func (m *BatchTaskManager) TaskStatus(queueID, taskID string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	queue, exists := m.queues[queueID]
+	if !exists || queue == nil {
+		return ""
+	}
+	for _, task := range queue.Tasks {
+		if task != nil && task.ID == taskID {
+			return task.Status
+		}
+	}
+	return ""
+}
+
 // HasRunningTasks 队列是否仍有 running 状态的子任务。
 func (m *BatchTaskManager) HasRunningTasks(queueID string) bool {
 	m.mu.RLock()
@@ -1588,4 +1615,108 @@ func (m *BatchTaskManager) recoverInterruptedQueueTasksInDBLocked(queueID string
 		return err
 	}
 	return nil
+}
+
+// recoverStaleRunningTasksLastRunError 运行期自愈回滚队列时写入 last_run_error 的提示文案。
+const recoverStaleRunningTasksLastRunError = "检测到超时未结束的运行中任务，已自动回滚为待执行，队列已暂停，点击「继续执行」可恢复"
+
+// staleRunningTaskMaxAge 超龄 running 子任务的回滚阈值（内存修复 H3）。
+// 取舍：需大于最慢合法任务。当前 tool_timeout_minutes 等配置默认无上限，
+// 若未来出现合法的超长任务，应把该阈值与配置联动（如 max(12h, tool_timeout×1.5)），
+// 此处暂用常量。判定为严格大于（started_at < now-maxAge 才回滚）。
+const staleRunningTaskMaxAge = 12 * time.Hour
+
+// RecoverStaleRunningTasks 运行期自愈（内存修复 H3，治存量卡死）：
+// 扫描全部队列，把 started_at 超过 maxAge 的 running 任务回滚 pending（DB 优先）；
+// 若所属队列状态 running 但已无活跃执行器（IsQueueExecutorActive 为假），
+// 队列置回 paused 并写提示，使「继续执行」可恢复。
+// 与 RecoverInterruptedQueues（仅进程启动时）互补，覆盖运行期发生的卡死。
+// 返回回滚的任务数。
+func (m *BatchTaskManager) RecoverStaleRunningTasks(maxAge time.Duration) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cutoff := time.Now().Add(-maxAge)
+	recovered := 0
+	// queueID -> 是否有超龄任务被回滚且队列需要置 paused
+	needPause := make(map[string]bool)
+
+	for queueID, queue := range m.queues {
+		if queue == nil {
+			continue
+		}
+		for _, task := range queue.Tasks {
+			if task == nil || task.Status != BatchTaskStatusRunning {
+				continue
+			}
+			startedAt := task.StartedAt
+			if startedAt == nil {
+				// 内存缺失 started_at（理论不应发生）：保守视为超龄，交由 DB 行判定
+				startedAt = &cutoff
+			}
+			// 严格大于阈值才回滚：startedAt < cutoff
+			if !startedAt.Before(cutoff) {
+				continue
+			}
+			// DB 优先：条件更新（仍 running 且 started_at 超龄）成功才动内存，
+			// 与真实执行路径并发时不会把刚被认领的任务错杀
+			if m.db != nil {
+				rolled, err := m.db.RecoverStaleBatchTask(queueID, task.ID, cutoff)
+				if err != nil {
+					m.logger.Warn("回滚超龄 running 任务失败，跳过",
+						zap.String("queueId", queueID), zap.String("taskId", task.ID), zap.Error(err))
+					continue
+				}
+				if !rolled {
+					// DB 行已非超龄 running（真实路径可能刚更新终态/重新认领）：
+					// 以 DB 为准同步内存视图，避免内存过期导致重复认领
+					if rows, rowsErr := m.db.GetBatchTasks(queueID); rowsErr == nil {
+						for _, row := range rows {
+							if row != nil && row.ID == task.ID {
+								task.Status = row.Status
+								break
+							}
+						}
+					}
+					continue
+				}
+			}
+			task.Status = BatchTaskStatusPending
+			task.StartedAt = nil
+			task.CompletedAt = nil
+			task.Error = ""
+			recovered++
+			needPause[queueID] = true
+			m.logger.Warn("已回滚超龄 running 批量子任务",
+				zap.String("queueId", queueID),
+				zap.String("taskId", task.ID),
+				zap.Duration("maxAge", maxAge))
+		}
+	}
+
+	for queueID := range needPause {
+		queue := m.queues[queueID]
+		if queue == nil || queue.Status != BatchQueueStatusRunning {
+			continue
+		}
+		// 持有 m.mu，不可调用 IsQueueExecutorActive（内部 RLock），直接查表
+		if _, active := m.queueExecutors[queueID]; active {
+			// 执行器仍在跑（其余 worker 可能还在正常干活），不动队列状态
+			continue
+		}
+		// 队列 running 但无活跃执行器：置回 paused，让「继续执行」可用
+		if m.db != nil {
+			if err := m.db.UpdateBatchQueueStatus(queueID, BatchQueueStatusPaused); err != nil {
+				m.logger.Warn("回滚超龄队列状态失败，仅更新内存",
+					zap.String("queueId", queueID), zap.Error(err))
+			} else if err := m.db.SetBatchQueueLastRunError(queueID, recoverStaleRunningTasksLastRunError); err != nil {
+				m.logger.Warn("写入自愈提示失败", zap.String("queueId", queueID), zap.Error(err))
+			}
+		}
+		queue.Status = BatchQueueStatusPaused
+		queue.LastRunError = recoverStaleRunningTasksLastRunError
+		m.logger.Warn("队列无活跃执行器且存在超龄 running 任务，已置回 paused",
+			zap.String("queueId", queueID))
+	}
+	return recovered
 }

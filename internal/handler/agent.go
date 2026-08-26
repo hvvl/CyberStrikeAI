@@ -2152,6 +2152,12 @@ func (h *AgentHandler) PauseBatchQueue(c *gin.Context) {
 // 等待 Cron 定时触发的 pending 队列（避免把定时队列提前打一轮）；
 // 逐队列 RBAC 资源校验（单个无权计入 skipped，不阻塞其余）。
 func (h *AgentHandler) ResumeInterruptedBatchQueues(c *gin.Context) {
+	// 内存修复 H3：先运行期自愈，把超龄 running 僵尸任务回滚 pending、
+	// 无执行器的 running 队列置回 paused，否则它们永远轮不到「继续执行」。
+	if rolled := h.batchTaskManager.RecoverStaleRunningTasks(staleRunningTaskMaxAge); rolled > 0 {
+		h.logger.Warn("一键续跑前已回滚超龄 running 任务", zap.Int("rolledBackTasks", rolled))
+	}
+
 	queues := h.batchTaskManager.GetAllQueues()
 	started := 0
 	skipped := 0
@@ -2519,30 +2525,49 @@ func (h *AgentHandler) startBatchQueueExecution(queueID string, scheduled bool) 
 	return true, nil
 }
 
+// batchStaleRunningTaskScanInterval 运行期自愈（内存修复 H3）的周期扫描间隔。
+const batchStaleRunningTaskScanInterval = 30 * time.Minute
+
 func (h *AgentHandler) batchQueueSchedulerLoop() {
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
-		queues := h.batchTaskManager.GetLoadedQueues()
-		now := time.Now()
-		for _, queue := range queues {
-			if queue == nil || queue.ScheduleMode != "cron" || !queue.ScheduleEnabled || queue.Status == "cancelled" || queue.Status == "running" || queue.Status == "paused" {
+	// 运行期自愈：周期性回滚超龄 running 僵尸任务（内存修复 H3）。
+	// 与 RecoverInterruptedQueues（仅进程启动时执行）互补，覆盖运行期卡死。
+	staleScan := time.NewTicker(batchStaleRunningTaskScanInterval)
+	defer staleScan.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			h.runBatchQueueSchedules()
+		case <-staleScan.C:
+			if rolled := h.batchTaskManager.RecoverStaleRunningTasks(staleRunningTaskMaxAge); rolled > 0 {
+				h.logger.Warn("周期自愈已回滚超龄 running 任务", zap.Int("rolledBackTasks", rolled))
+			}
+		}
+	}
+}
+
+// runBatchQueueSchedules 调度循环主体：触发到点的 cron 队列。
+func (h *AgentHandler) runBatchQueueSchedules() {
+	queues := h.batchTaskManager.GetLoadedQueues()
+	now := time.Now()
+	for _, queue := range queues {
+		if queue == nil || queue.ScheduleMode != "cron" || !queue.ScheduleEnabled || queue.Status == "cancelled" || queue.Status == "running" || queue.Status == "paused" {
+			continue
+		}
+		nextRunAt := queue.NextRunAt
+		if nextRunAt == nil {
+			next, err := h.nextBatchQueueRunAt(queue.CronExpr, now)
+			if err != nil {
+				h.logger.Warn("批量任务 cron 表达式无效，跳过调度", zap.String("queueId", queue.ID), zap.String("cronExpr", queue.CronExpr), zap.Error(err))
 				continue
 			}
-			nextRunAt := queue.NextRunAt
-			if nextRunAt == nil {
-				next, err := h.nextBatchQueueRunAt(queue.CronExpr, now)
-				if err != nil {
-					h.logger.Warn("批量任务 cron 表达式无效，跳过调度", zap.String("queueId", queue.ID), zap.String("cronExpr", queue.CronExpr), zap.Error(err))
-					continue
-				}
-				h.batchTaskManager.UpdateQueueSchedule(queue.ID, "cron", queue.CronExpr, next)
-				nextRunAt = next
-			}
-			if nextRunAt != nil && (nextRunAt.Before(now) || nextRunAt.Equal(now)) {
-				if _, err := h.startBatchQueueExecution(queue.ID, true); err != nil {
-					h.logger.Warn("自动调度批量任务失败", zap.String("queueId", queue.ID), zap.Error(err))
-				}
+			h.batchTaskManager.UpdateQueueSchedule(queue.ID, "cron", queue.CronExpr, next)
+			nextRunAt = next
+		}
+		if nextRunAt != nil && (nextRunAt.Before(now) || nextRunAt.Equal(now)) {
+			if _, err := h.startBatchQueueExecution(queue.ID, true); err != nil {
+				h.logger.Warn("自动调度批量任务失败", zap.String("queueId", queue.ID), zap.Error(err))
 			}
 		}
 	}
