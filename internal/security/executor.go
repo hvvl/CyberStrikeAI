@@ -388,7 +388,7 @@ func (e *Executor) buildCommandArgs(toolName string, toolConfig *config.ToolConf
 
 		// 对于需要子命令的工具（如 gobuster dir），position 0 必须紧跟在命令名后、所有 flag 之前
 		for _, param := range positionalParams {
-			if param.Name == "additional_args" || param.Name == "scan_type" || param.Name == "action" {
+			if param.Name == "additional_args" || param.Name == "scan_type" {
 				continue
 			}
 			if param.Position != nil && *param.Position == 0 {
@@ -406,8 +406,7 @@ func (e *Executor) buildCommandArgs(toolName string, toolConfig *config.ToolConf
 		// 处理标志参数
 		for _, param := range flagParams {
 			// 跳过特殊参数，它们会在后面单独处理
-			// action 参数仅用于工具内部逻辑，不传递给命令
-			if param.Name == "additional_args" || param.Name == "scan_type" || param.Name == "action" {
+			if param.Name == "additional_args" || param.Name == "scan_type" {
 				continue
 			}
 
@@ -531,8 +530,7 @@ func (e *Executor) buildCommandArgs(toolName string, toolConfig *config.ToolConf
 			}
 			for _, param := range positionalParams {
 				// 跳过特殊参数，它们会在后面单独处理
-				// action 参数仅用于工具内部逻辑，不传递给命令
-				if param.Name == "additional_args" || param.Name == "scan_type" || param.Name == "action" {
+				if param.Name == "additional_args" || param.Name == "scan_type" {
 					continue
 				}
 
