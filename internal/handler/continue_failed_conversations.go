@@ -373,6 +373,7 @@ func (h *AgentHandler) continueFailedConversation(conversationID string) {
 		return
 	}
 	registered = true
+	taskCtx = claimAgentTraceRun(taskCtx, h, conversationID)
 	h.tasks.UpdateTaskStatus(conversationID, "running")
 
 	// 先抢占任务成功再写"处理中"占位消息：避免 StartTask 与正常聊天请求竞争同一会话时
@@ -487,7 +488,7 @@ func (h *AgentHandler) continueFailedConversation(conversationID string) {
 		"mcpExecutionIds": result.MCPExecutionIDs,
 	})
 	if result.LastAgentTraceInput != "" || result.LastAgentTraceOutput != "" {
-		if err := h.db.SaveAgentTrace(conversationID, result.LastAgentTraceInput, result.LastAgentTraceOutput); err != nil {
+		if err := h.saveAgentTraceForContext(taskCtx, conversationID, result.LastAgentTraceInput, result.LastAgentTraceOutput); err != nil {
 			log.Warn("续跑失败会话：保存代理轨迹失败", zap.Error(err))
 		}
 	}

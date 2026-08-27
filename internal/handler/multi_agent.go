@@ -203,6 +203,7 @@ func (h *AgentHandler) MultiAgentLoopStream(c *gin.Context) {
 		return
 	}
 	taskOwned = true
+	taskCtx = claimAgentTraceRun(taskCtx, h, conversationID)
 
 	// 同一 HTTP 流内多段 Run（如中断并继续）合并 MCP execution id，供最终 response / 库表与工具芯片展示完整列表
 	var cumulativeMCPExecutionIDs []string
@@ -319,7 +320,7 @@ func (h *AgentHandler) MultiAgentLoopStream(c *gin.Context) {
 		}
 		if errors.Is(cause, multiagent.ErrInterruptContinue) {
 			if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {
-				h.persistEinoAgentTraceForResume(conversationID, result)
+				h.persistEinoAgentTraceForResume(baseCtx, conversationID, result)
 			}
 			note := h.tasks.TakeInterruptContinueNote(conversationID)
 			icSummary := interruptContinueTimelineSummary(note)
@@ -349,7 +350,7 @@ func (h *AgentHandler) MultiAgentLoopStream(c *gin.Context) {
 		}
 
 		if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {
-			h.persistEinoAgentTraceForResume(conversationID, result)
+			h.persistEinoAgentTraceForResume(baseCtx, conversationID, result)
 		}
 		if errors.Is(cause, ErrTaskCancelled) {
 			// 与单代理路径同构：取消时本轮无新轨迹则清掉旧轨迹，避免过期轨迹占坑。
@@ -435,7 +436,7 @@ func (h *AgentHandler) MultiAgentLoopStream(c *gin.Context) {
 	h.persistFinalizationDecision(conversationID, assistantMessageID, agentMode, cumulativeMCPExecutionIDs, multiagent.AggregatedReasoningFromTraceJSON(result.LastAgentTraceInput), decision)
 
 	if result.LastAgentTraceInput != "" || result.LastAgentTraceOutput != "" {
-		if err := h.db.SaveAgentTrace(conversationID, result.LastAgentTraceInput, result.LastAgentTraceOutput); err != nil {
+		if err := h.saveAgentTraceForContext(taskCtx, conversationID, result.LastAgentTraceInput, result.LastAgentTraceOutput); err != nil {
 			h.logger.Warn("保存代理轨迹失败", zap.Error(err))
 		}
 	}
@@ -543,7 +544,7 @@ func (h *AgentHandler) MultiAgentLoop(c *gin.Context) {
 		)
 		if runErr != nil {
 			if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {
-				h.persistEinoAgentTraceForResume(prep.ConversationID, result)
+				h.persistEinoAgentTraceForResume(baseCtx, prep.ConversationID, result)
 			}
 			// 临时错误重试耗尽 → 若配置了 fallback_channel，切换备用通道分段续跑。
 			if h.tryChannelFailover(runErr, failedChannelIDFromResult(result), &runCfg, channelFailover, prep.ConversationID, &curHist, progressCallback) {
@@ -575,7 +576,7 @@ func (h *AgentHandler) MultiAgentLoop(c *gin.Context) {
 	h.persistFinalizationDecision(prep.ConversationID, prep.AssistantMessageID, agentMode, result.MCPExecutionIDs, multiagent.AggregatedReasoningFromTraceJSON(result.LastAgentTraceInput), decision)
 
 	if result.LastAgentTraceInput != "" || result.LastAgentTraceOutput != "" {
-		if err := h.db.SaveAgentTrace(prep.ConversationID, result.LastAgentTraceInput, result.LastAgentTraceOutput); err != nil {
+		if err := h.saveAgentTraceForContext(baseCtx, prep.ConversationID, result.LastAgentTraceInput, result.LastAgentTraceOutput); err != nil {
 			h.logger.Warn("保存代理轨迹失败", zap.Error(err))
 		}
 	}
@@ -602,14 +603,16 @@ func (h *AgentHandler) MultiAgentLoop(c *gin.Context) {
 }
 
 // persistEinoAgentTraceForResume 在 Eino 运行异常结束时写入代理轨迹（库列 last_react_*），供下一请求 loadHistoryFromAgentTrace 软续跑。
-func (h *AgentHandler) persistEinoAgentTraceForResume(conversationID string, result *multiagent.RunResult) {
+// 写回按 ctx 携带的轨迹代次条件更新：若会话在本次运行期间被删除轮次（或已有新运行
+// 接管），写回被静默放弃，避免把用户已删除的上下文重新写回。
+func (h *AgentHandler) persistEinoAgentTraceForResume(ctx context.Context, conversationID string, result *multiagent.RunResult) {
 	if h == nil || result == nil {
 		return
 	}
 	if result.LastAgentTraceInput == "" && result.LastAgentTraceOutput == "" {
 		return
 	}
-	if err := h.db.SaveAgentTrace(conversationID, result.LastAgentTraceInput, result.LastAgentTraceOutput); err != nil {
+	if err := h.saveAgentTraceForContext(ctx, conversationID, result.LastAgentTraceInput, result.LastAgentTraceOutput); err != nil {
 		h.logger.Warn("保存 Eino 续跑上下文失败", zap.String("conversationId", conversationID), zap.Error(err))
 	}
 }

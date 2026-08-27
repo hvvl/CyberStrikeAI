@@ -88,6 +88,7 @@ func (h *AgentHandler) runRoleWorkflowStreamIfBound(
 		return true
 	}
 	taskOwned = true
+	baseCtx = claimAgentTraceRun(baseCtx, h, conversationID)
 
 	progress := h.createProgressCallback(taskCtx, cancelWithCause, conversationID, assistantMessageID, sendEvent)
 	result, err := workflowrunner.RunRoleBoundWorkflow(taskCtx, workflowrunner.RunArgs{
@@ -226,6 +227,7 @@ func (h *AgentHandler) runRoleWorkflowJSONIfBound(c *gin.Context, req *ChatReque
 		return true
 	}
 	taskOwned = true
+	baseCtx = claimAgentTraceRun(baseCtx, h, conversationID)
 
 	progress := h.createProgressCallback(taskCtx, cancelWithCause, conversationID, assistantMessageID, nil)
 	result, err := workflowrunner.RunRoleBoundWorkflow(taskCtx, workflowrunner.RunArgs{

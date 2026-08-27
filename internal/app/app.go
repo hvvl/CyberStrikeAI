@@ -440,6 +440,7 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	conversationHandler.SetAudit(auditSvc)
 	conversationHandler.SetTaskStopper(agentHandler)
 	conversationHandler.SetTaskStateProvider(agentHandler)
+	conversationHandler.SetTaskRegistry(agentHandler)
 	auditHandler := handler.NewAuditHandler(db, auditSvc, log.Logger)
 	robotHandler := handler.NewRobotHandler(cfg, db, agentHandler, log.Logger)
 	robotHandler.SetAudit(auditSvc)

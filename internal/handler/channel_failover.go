@@ -280,7 +280,7 @@ func (h *AgentHandler) runAgentWithChannelFailover(
 			return result, nil
 		}
 		if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {
-			h.persistEinoAgentTraceForResume(conversationID, result)
+			h.persistEinoAgentTraceForResume(baseCtx, conversationID, result)
 		}
 		if h.tryChannelFailover(runErr, failedChannelIDFromResult(result), &runCfg, failover, conversationID, curHistory, notify) {
 			continue

@@ -187,7 +187,8 @@ func (db *DB) initTables() error {
 		agent_mode TEXT NOT NULL DEFAULT 'eino_single',
 		ai_channel_id TEXT,
 		last_react_input TEXT,
-		last_react_output TEXT
+		last_react_output TEXT,
+		trace_run_id TEXT
 	);`
 
 	// 创建消息表
@@ -1051,6 +1052,14 @@ func (db *DB) migrateConversationsTable() error {
 		// 字段不存在，添加它
 		if _, err := db.Exec("ALTER TABLE conversations ADD COLUMN last_react_output TEXT"); err != nil {
 			db.logger.Warn("添加last_react_output字段失败", zap.Error(err))
+		}
+	}
+
+	// 检查trace_run_id字段是否存在（轨迹代次：删除轮次/新运行换代替换，使滞留写手的轨迹写回失效）
+	err = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name='trace_run_id'").Scan(&count)
+	if err == nil && count == 0 {
+		if _, err := db.Exec("ALTER TABLE conversations ADD COLUMN trace_run_id TEXT"); err != nil {
+			db.logger.Warn("添加trace_run_id字段失败", zap.Error(err))
 		}
 	}
 

@@ -4916,6 +4916,21 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 						"400": map[string]interface{}{"description": "参数错误或删除失败"},
 						"401": map[string]interface{}{"description": "未授权"},
 						"404": map[string]interface{}{"description": "对话不存在"},
+						"409": map[string]interface{}{
+							"description": "会话任务仍在执行（running）或正在停止（cancelling）。任务收尾仍会写回代理轨迹，此刻删除会被拒绝；请等待任务完全结束（前端按钮恢复为「发送」）后重试。响应含 taskStatus 与 retryAfter(秒)。",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"error":      map[string]interface{}{"type": "string"},
+											"taskStatus": map[string]interface{}{"type": "string", "enum": []string{"running", "cancelling"}},
+											"retryAfter": map[string]interface{}{"type": "integer"},
+										},
+									},
+								},
+							},
+						},
 					},
 				},
 			},

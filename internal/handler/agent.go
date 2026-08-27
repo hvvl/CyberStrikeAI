@@ -244,6 +244,23 @@ func (h *AgentHandler) ConversationTaskRuntimeState(conversationID string) (bool
 	return true, task.StartedAt
 }
 
+// ConversationTaskSnapshot 实现 ConversationTaskRegistry：供删除轮次等破坏性操作
+// 做运行态守卫（running/cancelling 都视为在飞）。
+func (h *AgentHandler) ConversationTaskSnapshot(conversationID string) (string, bool) {
+	if h == nil || h.tasks == nil {
+		return "", false
+	}
+	id := strings.TrimSpace(conversationID)
+	if id == "" {
+		return "", false
+	}
+	task := h.tasks.GetTaskSnapshot(id)
+	if task == nil {
+		return "", false
+	}
+	return task.Status, true
+}
+
 func (h *AgentHandler) cancelRunningMCPToolsForConversation(conversationID string) {
 	if h == nil || h.agent == nil {
 		return
@@ -753,7 +770,7 @@ type ChatResponse struct {
 
 func (h *AgentHandler) finalizeRobotAgentError(ctx context.Context, assistantMessageID, conversationID string, resultMA *multiagent.RunResult, errMA error) (string, string, error) {
 	if shouldPersistEinoAgentTraceAfterRunError(ctx) {
-		h.persistEinoAgentTraceForResume(conversationID, resultMA)
+		h.persistEinoAgentTraceForResume(ctx, conversationID, resultMA)
 	}
 	errMsg := agentRunErrorMsg(errMA)
 	if assistantMessageID != "" {
@@ -780,7 +797,7 @@ func (h *AgentHandler) finalizeRobotAgentSuccess(taskCtx context.Context, assist
 		}
 	}
 	if resultMA.LastAgentTraceInput != "" || resultMA.LastAgentTraceOutput != "" {
-		_ = h.db.SaveAgentTrace(conversationID, resultMA.LastAgentTraceInput, resultMA.LastAgentTraceOutput)
+		_ = h.saveAgentTraceForContext(taskCtx, conversationID, resultMA.LastAgentTraceInput, resultMA.LastAgentTraceOutput)
 	}
 	return responseText, conversationID, nil
 }

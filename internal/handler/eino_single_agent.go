@@ -197,6 +197,7 @@ func (h *AgentHandler) EinoSingleAgentLoopStream(c *gin.Context) {
 		return
 	}
 	taskOwned = true
+	taskCtx = claimAgentTraceRun(taskCtx, h, conversationID)
 
 	var cumulativeMCPExecutionIDs []string
 	// 同一请求内分段续跑时，主代理 iteration 事件按偏移累计，避免 UI 出现「第3轮 → 第1轮」回跳。
@@ -305,7 +306,7 @@ func (h *AgentHandler) EinoSingleAgentLoopStream(c *gin.Context) {
 		}
 		if errors.Is(cause, multiagent.ErrInterruptContinue) {
 			if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {
-				h.persistEinoAgentTraceForResume(conversationID, result)
+				h.persistEinoAgentTraceForResume(baseCtx, conversationID, result)
 			}
 			note := h.tasks.TakeInterruptContinueNote(conversationID)
 			icSummary := interruptContinueTimelineSummary(note)
@@ -335,7 +336,7 @@ func (h *AgentHandler) EinoSingleAgentLoopStream(c *gin.Context) {
 		}
 
 		if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {
-			h.persistEinoAgentTraceForResume(conversationID, result)
+			h.persistEinoAgentTraceForResume(baseCtx, conversationID, result)
 		}
 		if errors.Is(cause, ErrTaskCancelled) {
 			// 取消时若本轮未留下新轨迹，清除旧一轮轨迹：否则过期轨迹"占坑"，
@@ -422,7 +423,7 @@ func (h *AgentHandler) EinoSingleAgentLoopStream(c *gin.Context) {
 	h.persistFinalizationDecision(conversationID, assistantMessageID, "eino_single", cumulativeMCPExecutionIDs, multiagent.AggregatedReasoningFromTraceJSON(result.LastAgentTraceInput), decision)
 
 	if result.LastAgentTraceInput != "" || result.LastAgentTraceOutput != "" {
-		if err := h.db.SaveAgentTrace(conversationID, result.LastAgentTraceInput, result.LastAgentTraceOutput); err != nil {
+		if err := h.saveAgentTraceForContext(taskCtx, conversationID, result.LastAgentTraceInput, result.LastAgentTraceOutput); err != nil {
 			h.logger.Warn("保存代理轨迹失败", zap.Error(err))
 		}
 	}
@@ -528,7 +529,7 @@ func (h *AgentHandler) EinoSingleAgentLoop(c *gin.Context) {
 		)
 		if runErr != nil {
 			if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {
-				h.persistEinoAgentTraceForResume(prep.ConversationID, result)
+				h.persistEinoAgentTraceForResume(baseCtx, prep.ConversationID, result)
 			}
 			// 临时错误重试耗尽 → 若配置了 fallback_channel，切换备用通道分段续跑。
 			if h.tryChannelFailover(runErr, failedChannelIDFromResult(result), &runCfg, channelFailover, prep.ConversationID, &curHist, progressCallback) {
@@ -554,7 +555,7 @@ func (h *AgentHandler) EinoSingleAgentLoop(c *gin.Context) {
 
 	h.persistFinalizationDecision(prep.ConversationID, prep.AssistantMessageID, "eino_single", result.MCPExecutionIDs, multiagent.AggregatedReasoningFromTraceJSON(result.LastAgentTraceInput), decision)
 	if result.LastAgentTraceInput != "" || result.LastAgentTraceOutput != "" {
-		_ = h.db.SaveAgentTrace(prep.ConversationID, result.LastAgentTraceInput, result.LastAgentTraceOutput)
+		_ = h.saveAgentTraceForContext(baseCtx, prep.ConversationID, result.LastAgentTraceInput, result.LastAgentTraceOutput)
 	}
 
 	responseText := decision.FinalText

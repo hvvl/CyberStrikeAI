@@ -532,6 +532,7 @@
     "noProcessDetail": "No process details (execution may be too fast or no detailed events)",
     "copyMessageTitle": "Copy message",
     "deleteTurnTitle": "Delete this turn",
+    "deleteTurnBusy": "Task is running or stopping; delete is available once it fully ends (button shows \"Send\")",
     "deleteTurnConfirm": "Delete this entire turn (user message and assistant reply)? This cannot be undone. The next reply will use only the remaining messages; saved context snapshots will be cleared.",
     "deleteTurnFailed": "Failed to delete turn",
     "emptyGroupConversations": "This group has no conversations yet.",

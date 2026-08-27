@@ -42,7 +42,7 @@ func (h *AgentHandler) tryAutoContinueAfterFinalization(
 		return false
 	}
 	*attempt++
-	h.persistEinoAgentTraceForResume(conversationID, result)
+	h.persistEinoAgentTraceForResume(taskCtx, conversationID, result)
 	if hist, err := h.loadHistoryFromAgentTrace(conversationID); err == nil && len(hist) > 0 {
 		*curHistory = hist
 	} else if h.logger != nil {

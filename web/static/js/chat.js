@@ -1858,6 +1858,8 @@ function updateChatPrimaryActionState() {
     button.setAttribute('title', label);
     const labelElement = button.querySelector('.send-btn-label');
     if (labelElement) labelElement.textContent = label;
+    // 任务态切换时同步「删除本轮」按钮可用性（运行/取消中禁止删除，防旧 prompt 复活竞态）
+    syncAllDeleteTurnButtonsState();
 }
 
 function handleChatPrimaryAction(event) {
@@ -6743,11 +6745,40 @@ function attachDeleteTurnButton(messageEl) {
     } else {
         content.appendChild(btn);
     }
+    syncDeleteTurnButtonState(btn);
+}
+
+/** 任务运行/取消中禁用「删除本轮」：后端取消是异步的，Run 收尾仍会写回轨迹，
+ *  此时删除会被 409 拒绝；直接置灰给出原因，避免用户误以为删除成功。 */
+function syncDeleteTurnButtonState(btn) {
+    if (!btn) return;
+    const running = typeof isCurrentChatTaskActive === 'function' && isCurrentChatTaskActive();
+    btn.disabled = running;
+    if (running) {
+        const busy = typeof window.t === 'function' ? window.t('chat.deleteTurnBusy') : '任务执行中，暂不能删除本轮';
+        btn.title = busy;
+        btn.setAttribute('aria-label', busy);
+    } else {
+        const title = typeof window.t === 'function' ? window.t('chat.deleteTurnTitle') : '删除本轮对话';
+        btn.title = title;
+        btn.setAttribute('aria-label', title);
+    }
+}
+
+/** 任务状态切换时刷新所有「删除本轮」按钮的可用态 */
+function syncAllDeleteTurnButtonsState() {
+    document.querySelectorAll('.message-delete-turn-btn').forEach(syncDeleteTurnButtonState);
 }
 
 /** 删除锚点所在整轮（后端：该轮 user 至下一轮 user 之前），并清空 ReAct 快照 */
 async function deleteConversationTurnFromUI(anchorBackendMessageId) {
     if (!currentConversationId || !anchorBackendMessageId) return;
+    // 运行/取消中直接拦截（后端也会 409；此处避免用户白点确认框）
+    if (typeof isCurrentChatTaskActive === 'function' && isCurrentChatTaskActive()) {
+        const busy = typeof window.t === 'function' ? window.t('chat.deleteTurnBusy') : '任务执行中，暂不能删除本轮';
+        alert(busy);
+        return;
+    }
     const confirmMsg = typeof window.t === 'function' ? window.t('chat.deleteTurnConfirm') : '确定删除本轮对话？';
     if (!confirm(confirmMsg)) return;
     try {

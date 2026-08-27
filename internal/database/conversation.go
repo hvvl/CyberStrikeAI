@@ -941,17 +941,66 @@ func (db *DB) removeProjectScopedDirs(projectID string) {
 	db.removeConversationScopedDir(workspaceBase, projectID, "workspace")
 }
 
-// SaveAgentTrace 保存最后一轮代理消息轨迹与助手输出摘要。
+// ErrTraceRunStale 轨迹代次不匹配：会话在本次运行期间被删除轮次/换代，写手已过期。
+// 该写回必须放弃，否则会把用户已删除的上下文重新写回（"删不掉的 prompt"竞态）。
+var ErrTraceRunStale = errors.New("agent trace run stale: conversation trace generation changed during run")
+
+// IsTraceRunStale 判定 err 链上是否为轨迹代次失配（含 %w 包装）。
+func IsTraceRunStale(err error) bool {
+	return err != nil && errors.Is(err, ErrTraceRunStale)
+}
+
+// SaveAgentTrace 保存最后一轮代理消息轨迹与助手输出摘要（无条件写，兼容旧调用方）。
 // SQLite 列名仍为 last_react_input / last_react_output，与历史库表兼容；语义上为「全模式代理轨迹」，非仅 ReAct。
 func (db *DB) SaveAgentTrace(conversationID, traceInputJSON, assistantOutput string) error {
-	_, err := db.Exec(
-		"UPDATE conversations SET last_react_input = ?, last_react_output = ?, updated_at = ? WHERE id = ?",
-		traceInputJSON, assistantOutput, time.Now(), conversationID,
+	return db.SaveAgentTraceForRun(conversationID, "", traceInputJSON, assistantOutput)
+}
+
+// SaveAgentTraceForRun 按轨迹代次条件写入。runID 非空时仅当 conversations.trace_run_id
+// 仍等于 runID 才落库；行不存在或代次已换（删除轮次/新运行已声明）返回 ErrTraceRunStale。
+// runID 为空退化为无条件写（非流式旧路径，未参与代次机制）。
+func (db *DB) SaveAgentTraceForRun(conversationID, runID, traceInputJSON, assistantOutput string) error {
+	var (
+		res sql.Result
+		err error
 	)
+	if runID == "" {
+		res, err = db.Exec(
+			"UPDATE conversations SET last_react_input = ?, last_react_output = ?, updated_at = ? WHERE id = ?",
+			traceInputJSON, assistantOutput, time.Now(), conversationID,
+		)
+	} else {
+		res, err = db.Exec(
+			"UPDATE conversations SET last_react_input = ?, last_react_output = ?, updated_at = ? WHERE id = ? AND trace_run_id = ?",
+			traceInputJSON, assistantOutput, time.Now(), conversationID, runID,
+		)
+	}
 	if err != nil {
 		return fmt.Errorf("保存代理轨迹失败: %w", err)
 	}
+	if runID != "" {
+		if n, raErr := res.RowsAffected(); raErr == nil && n == 0 {
+			return ErrTraceRunStale
+		}
+	}
 	return nil
+}
+
+// ClaimAgentTraceRun 为一次运行声明新的轨迹代次 ID 并写入 conversations.trace_run_id。
+// 必须在任务注册成功后调用；删除轮次会在事务内换代，使持有旧 runID 的滞留写手全部失效。
+func (db *DB) ClaimAgentTraceRun(conversationID string) (string, error) {
+	runID := uuid.NewString()
+	res, err := db.Exec(
+		"UPDATE conversations SET trace_run_id = ?, updated_at = ? WHERE id = ?",
+		runID, time.Now(), conversationID,
+	)
+	if err != nil {
+		return "", fmt.Errorf("声明代理轨迹代次失败: %w", err)
+	}
+	if n, raErr := res.RowsAffected(); raErr == nil && n == 0 {
+		return "", fmt.Errorf("对话不存在")
+	}
+	return runID, nil
 }
 
 // ClearAgentTrace 清除会话保存的代理轨迹（last_react_* 置 NULL）。
@@ -1261,8 +1310,8 @@ func (db *DB) DeleteConversationTurn(conversationID, anchorMessageID string) (de
 	}
 
 	_, err = tx.Exec(
-		`UPDATE conversations SET last_react_input = NULL, last_react_output = NULL, updated_at = ? WHERE id = ?`,
-		time.Now(), conversationID,
+		`UPDATE conversations SET last_react_input = NULL, last_react_output = NULL, trace_run_id = ?, updated_at = ? WHERE id = ?`,
+		uuid.NewString(), time.Now(), conversationID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("clear react data: %w", err)

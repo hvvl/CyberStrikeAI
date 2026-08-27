@@ -48,7 +48,7 @@ func (h *AgentHandler) tryContinueOnEinoEmptyResponse(
 		return false
 	}
 	*attempt++
-	h.persistEinoAgentTraceForResume(conversationID, result)
+	h.persistEinoAgentTraceForResume(taskCtx, conversationID, result)
 
 	backoff := multiagent.EmptyResponseContinueBackoff(*attempt-1, mw)
 	waitMsg := fmt.Sprintf("会话已结束但未捕获到助手正文，%d 秒后第 %d/%d 次自动续跑…",
@@ -68,7 +68,7 @@ func (h *AgentHandler) tryContinueOnEinoEmptyResponse(
 	case <-time.After(backoff):
 	}
 
-	h.applyEinoTraceResumeSegment(conversationID, result, curHistory, curFinalMessage, "")
+	h.applyEinoTraceResumeSegment(taskCtx, conversationID, result, curHistory, curFinalMessage, "")
 	if progressCallback != nil {
 		progressCallback("eino_empty_response_continue", "已恢复上下文，正在续跑…", map[string]interface{}{
 			"conversationId":   conversationID,

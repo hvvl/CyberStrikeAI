@@ -27,13 +27,20 @@ type ConversationTaskStateProvider interface {
 	ConversationTaskRuntimeState(conversationID string) (running bool, startedAt time.Time)
 }
 
+// ConversationTaskRegistry 报告会话当前内存任务快照（含 running/cancelling），
+// 供删除轮次等破坏性操作做运行态守卫。
+type ConversationTaskRegistry interface {
+	ConversationTaskSnapshot(conversationID string) (status string, exists bool)
+}
+
 // ConversationHandler 对话处理器
 type ConversationHandler struct {
-	db          *database.DB
-	logger      *zap.Logger
-	audit       *audit.Service
-	taskStopper ConversationTaskStopper
-	taskState   ConversationTaskStateProvider
+	db           *database.DB
+	logger       *zap.Logger
+	audit        *audit.Service
+	taskStopper  ConversationTaskStopper
+	taskState    ConversationTaskStateProvider
+	taskRegistry ConversationTaskRegistry
 }
 
 // SetAudit wires platform audit logging.
@@ -50,6 +57,12 @@ func (h *ConversationHandler) SetTaskStopper(stopper ConversationTaskStopper) {
 // conversation UI such as the agent-maintained plan list.
 func (h *ConversationHandler) SetTaskStateProvider(provider ConversationTaskStateProvider) {
 	h.taskState = provider
+}
+
+// SetTaskRegistry wires the live agent task snapshot source used by destructive
+// operations (delete-turn) to refuse while a run/cancel is still in flight.
+func (h *ConversationHandler) SetTaskRegistry(registry ConversationTaskRegistry) {
+	h.taskRegistry = registry
 }
 
 // NewConversationHandler 创建新的对话处理器
@@ -600,6 +613,23 @@ func (h *ConversationHandler) DeleteConversationTurn(c *gin.Context) {
 	if _, err := h.db.GetConversation(conversationID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
 		return
+	}
+
+	// 运行态守卫：任务 running/cancelling 期间拒绝删除。
+	// 取消是异步的（「任务将在当前步骤完成后停止」），Run 协程退场时仍会写回代理轨迹；
+	// 若此时放行删除，随后的轨迹写回会把已删除轮次的上下文重新写回（复活）。
+	if h.taskRegistry != nil {
+		if status, exists := h.taskRegistry.ConversationTaskSnapshot(conversationID); exists {
+			switch strings.ToLower(strings.TrimSpace(status)) {
+			case "running", "cancelling":
+				c.JSON(http.StatusConflict, gin.H{
+					"error":      "会话任务仍在执行或正在停止，请等待其完全结束（按钮恢复为「发送」）后再删除轮次",
+					"taskStatus": status,
+					"retryAfter": 5,
+				})
+				return
+			}
+		}
 	}
 
 	deletedIDs, err := h.db.DeleteConversationTurn(conversationID, req.MessageID)

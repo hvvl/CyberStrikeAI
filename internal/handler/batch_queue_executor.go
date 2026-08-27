@@ -231,6 +231,7 @@ func (h *AgentHandler) executeOneBatchSubTask(queueID string, queue *BatchTaskQu
 		return
 	}
 	registered = true
+	taskCtx = claimAgentTraceRun(taskCtx, h, conversationID)
 	h.batchTaskManager.SetTaskCancel(queueID, task.ID, timeoutCancel)
 
 	progressCallback := h.createProgressCallback(taskCtx, cancelWithCause, conversationID, assistantMessageID, sendEvent)
@@ -353,7 +354,7 @@ func (h *AgentHandler) executeOneBatchSubTask(queueID string, queue *BatchTaskQu
 	}
 
 	if lastIn != "" || lastOut != "" {
-		if err := h.db.SaveAgentTrace(conversationID, lastIn, lastOut); err != nil {
+		if err := h.saveAgentTraceForContext(baseCtx, conversationID, lastIn, lastOut); err != nil {
 			h.logger.Warn("保存代理轨迹失败", zap.String("queueId", queueID), zap.String("taskId", task.ID), zap.Error(err))
 		}
 	}
@@ -386,7 +387,7 @@ func (h *AgentHandler) handleBatchSubTaskRunError(
 	finishStatus *string,
 ) {
 	if shouldPersistEinoAgentTraceAfterRunError(baseCtx) {
-		h.persistEinoAgentTraceForResume(conversationID, resultMA)
+		h.persistEinoAgentTraceForResume(baseCtx, conversationID, resultMA)
 	}
 	errStr := runErr.Error()
 	partialResp := ""
