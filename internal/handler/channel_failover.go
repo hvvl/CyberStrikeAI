@@ -48,7 +48,18 @@ func agentRunErrorMsg(runErr error) string {
 		msg = runErr.Error()
 	}
 	if runErr != nil && errors.Is(runErr, multiagent.ErrRetryExhausted) {
+		// 上游 2026-09 EinoClientRunErrorMessage：重试耗尽/摘要模型错误透出原始模型错误，
+		// 便于从前端直接诊断。此处统一走富化消息体；标签前缀不变，继续失败会话靠它过滤。
+		rich := multiagent.EinoClientRunErrorMessage(runErr)
+		if strings.TrimSpace(rich) != "" {
+			msg = rich
+		}
 		return apiFailureTagPrefix + " 执行失败: " + msg
+	}
+	// 普通错误也走上游富化（summarization 原始错误单透出），失败则还原样。
+	rich := multiagent.EinoClientRunErrorMessage(runErr)
+	if strings.TrimSpace(rich) != "" {
+		msg = rich
 	}
 	return "执行失败: " + msg
 }

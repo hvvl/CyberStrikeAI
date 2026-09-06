@@ -402,10 +402,11 @@ func (h *AgentHandler) EinoSingleAgentLoopStream(c *gin.Context) {
 			_, _ = h.db.Exec("UPDATE messages SET content = ?, updated_at = ? WHERE id = ?", errMsg, time.Now(), assistantMessageID)
 			_ = h.db.AddProcessDetail(assistantMessageID, conversationID, "error", errMsg, nil)
 		}
-		sendEvent("error", errMsg, map[string]interface{}{
-			"conversationId": conversationID,
-			"messageId":      assistantMessageID,
-		})
+		errData := multiagent.EinoClientRunErrorFields(runErr)
+		errData["conversationId"] = conversationID
+		errData["messageId"] = assistantMessageID
+		errData["error"] = errMsg
+		sendEvent("error", errMsg, errData)
 		sendEvent("done", "", map[string]interface{}{"conversationId": conversationID})
 		timeoutCancel()
 		return

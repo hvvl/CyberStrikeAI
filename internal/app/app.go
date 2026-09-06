@@ -389,7 +389,6 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 	monitorHandler.SetTaskManager(agentHandler.TaskManager())
 	monitorHandler.SetAgentHandler(agentHandler)
 	notificationHandler := handler.NewNotificationHandler(db, agentHandler, log.Logger)
-	groupHandler := handler.NewGroupHandler(db, log.Logger)
 	authHandler := handler.NewAuthHandler(authManager, cfg, configPath, log.Logger)
 	authHandler.SetAudit(auditSvc)
 	attackChainHandler := handler.NewAttackChainHandler(db, &cfg.OpenAI, log.Logger)
@@ -562,7 +561,6 @@ func New(cfg *config.Config, log *logger.Logger, configPath string) (*App, error
 		conversationHandler,
 		robotHandler,
 		wechatRobotHandler,
-		groupHandler,
 		configHandler,
 		externalMCPHandler,
 		attackChainHandler,
@@ -867,7 +865,6 @@ func setupRoutes(
 	conversationHandler *handler.ConversationHandler,
 	robotHandler *handler.RobotHandler,
 	wechatRobotHandler *handler.WechatRobotHandler,
-	groupHandler *handler.GroupHandler,
 	configHandler *handler.ConfigHandler,
 	externalMCPHandler *handler.ExternalMCPHandler,
 	attackChainHandler *handler.AttackChainHandler,
@@ -1026,20 +1023,7 @@ func setupRoutes(
 		protected.PUT("/conversations/:id/project", conversationHandler.SetConversationProject)
 		protected.DELETE("/conversations/:id", conversationHandler.DeleteConversation)
 		protected.POST("/conversations/:id/delete-turn", conversationHandler.DeleteConversationTurn)
-		protected.PUT("/conversations/:id/pinned", groupHandler.UpdateConversationPinned)
-
-		// 对话分组
-		protected.POST("/groups", groupHandler.CreateGroup)
-		protected.GET("/groups", groupHandler.ListGroups)
-		protected.GET("/groups/:id", groupHandler.GetGroup)
-		protected.PUT("/groups/:id", groupHandler.UpdateGroup)
-		protected.DELETE("/groups/:id", groupHandler.DeleteGroup)
-		protected.PUT("/groups/:id/pinned", groupHandler.UpdateGroupPinned)
-		protected.GET("/groups/:id/conversations", groupHandler.GetGroupConversations)
-		protected.GET("/groups/mappings", groupHandler.GetAllMappings)
-		protected.POST("/groups/conversations", groupHandler.AddConversationToGroup)
-		protected.DELETE("/groups/:id/conversations/:conversationId", groupHandler.RemoveConversationFromGroup)
-		protected.PUT("/groups/:id/conversations/:conversationId/pinned", groupHandler.UpdateConversationPinnedInGroup)
+		protected.PUT("/conversations/:id/pinned", conversationHandler.UpdateConversationPinned)
 
 		// 监控
 		protected.GET("/monitor", monitorHandler.Monitor)
