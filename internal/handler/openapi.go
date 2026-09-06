@@ -1766,6 +1766,43 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 					},
 				},
 			},
+			"/api/agent-loop/failed": map[string]interface{}{
+				"get": map[string]interface{}{
+					"tags":        []string{"对话交互"},
+					"summary":     "查询API失败会话",
+					"description": "返回上次执行因 API 调用失败([api_failure:*] 标签)中断的会话列表。列表最多返回最近 100 条，total 为过滤运行中/RBAC 后的真实总数，truncated 标识是否截断。",
+					"operationId": "listFailedConversations",
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "返回 {items, count, total, truncated}"},
+						"401": map[string]interface{}{"description": "未授权"},
+					},
+				},
+			},
+			"/api/agent-loop/continue-failed": map[string]interface{}{
+				"post": map[string]interface{}{
+					"tags":        []string{"对话交互"},
+					"summary":     "一键继续失败会话",
+					"description": "把 API 失败的会话加入后台续跑队列。body 可选 {conversationIds:[]}（空=继续全部）；跳过正在执行/已在队列的会话，返回 {queued, skipped} 计数。",
+					"operationId": "continueFailedConversations",
+					"requestBody": map[string]interface{}{
+						"required":    false,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"type":     "object",
+									"properties": map[string]interface{}{
+										"conversationIds": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "留空表示继续全部失败会话"},
+									},
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "返回 queued / skipped 计数"},
+						"401": map[string]interface{}{"description": "未授权"},
+					},
+				},
+			},
 			"/api/agent-loop/cancel": map[string]interface{}{
 				"post": map[string]interface{}{
 					"tags":        []string{"对话交互"},
@@ -2365,6 +2402,53 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 						"401": map[string]interface{}{
 							"description": "未授权",
 						},
+					},
+				},
+			},
+			"/api/projects/dashboard-summary": map[string]interface{}{
+				"get": map[string]interface{}{
+					"tags":        []string{"项目"},
+					"summary":     "项目仪表盘汇总",
+					"description": "汇总项目数量/活跃项目/漏洞严重级分布等概览数据。",
+					"operationId": "getDashboardSummary",
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "返回汇总对象"},
+						"401": map[string]interface{}{"description": "未授权"},
+					},
+				},
+			},
+			"/api/projects/:id/stats": map[string]interface{}{
+				"get": map[string]interface{}{
+					"tags":        []string{"项目"},
+					"summary":     "项目统计计数",
+					"description": "返回项目级统计：vuln_count（关联漏洞数）、conversation_count（关联会话数）。",
+					"operationId": "getProjectStatsCounts",
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "id",
+							"in":          "path",
+							"required":    true,
+							"description": "项目ID",
+							"schema":      map[string]interface{}{"type": "string"},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "获取成功",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type":       "object",
+										"properties": map[string]interface{}{
+											"vuln_count":         map[string]interface{}{"type": "integer", "description": "关联漏洞数"},
+											"conversation_count": map[string]interface{}{"type": "integer", "description": "关联会话数"},
+										},
+									},
+								},
+							},
+						},
+							"401": map[string]interface{}{"description": "未授权"},
+							"404": map[string]interface{}{"description": "项目不存在"},
 					},
 				},
 			},
@@ -6277,5 +6361,10 @@ func (h *OpenAPIHandler) GetConversationResults(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+
+
+
+
 
 
