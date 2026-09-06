@@ -91,7 +91,6 @@ ai:
       fallback_channel: ""
       # 推理控制（可选）：mode auto|on|off；effort low|medium|high|max|xhigh；profile auto|deepseek_compat|openai_compat|output_config_effort
       reasoning:
-      reasoning:
         mode: "on"
         effort: high
         allow_client_reasoning: true # false 时忽略对话请求体 reasoning，仅以下方为准
