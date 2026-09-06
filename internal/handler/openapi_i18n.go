@@ -11,7 +11,7 @@ var apiDocI18nTagToKey = map[string]string{
 	"知识库": "knowledgeBase", "MCP": "mcp",
 	"终端": "terminal", "WebShell管理": "webshellManagement",
 	"对话附件": "chatUploads", "机器人集成": "robotIntegration", "多代理Markdown": "markdownAgents",
-	"项目管理": "projectManagement",
+	"项目管理": "projectManagement", "项目": "project",
 }
 
 var apiDocI18nSummaryToKey = map[string]string{
@@ -72,6 +72,9 @@ var apiDocI18nSummaryToKey = map[string]string{
 
 var apiDocI18nResponseDescToKey = map[string]string{
 	"获取成功": "getSuccess", "未授权": "unauthorized", "未授权，需要有效的Token": "unauthorizedToken",
+	"返回 {items, count, total, truncated}": "failedConversationsResult",
+	"返回汇总对象": "dashboardSummaryResult",
+	"返回项目级统计：vuln_count（关联漏洞数）、conversation_count（关联会话数）。": "statsCountsDesc",
 	"创建成功": "createSuccess", "请求参数错误": "badRequest", "对话不存在": "conversationNotFound",
 	"对话不存在或结果不存在": "conversationOrResultNotFound", "请求参数错误（如task为空）": "badRequestTaskEmpty",
 	"请求参数错误（如配置格式不正确、缺少必需字段等）": "badRequestConfig",
@@ -95,6 +98,8 @@ var apiDocI18nResponseDescToKey = map[string]string{
 	"处理成功": "processSuccess", "代理不存在": "agentNotFound", "保存成功": "saveSuccess",
 	"操作结果": "operationResult", "执行结果": "executionResult", "连接不存在": "connectionNotFound",
 	"项目列表": "projectList", "项目详情": "projectDetail",
+	"查询API失败会话": "listFailedConversations", "一键继续失败会话": "continueFailedConversations",
+	"项目仪表盘汇总": "getDashboardSummary", "项目统计计数": "getProjectStatsCounts",
 	"成功": "success",
 }
 

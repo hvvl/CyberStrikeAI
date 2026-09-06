@@ -1591,7 +1591,8 @@
       "chatUploads": "Chat Uploads",
       "robotIntegration": "Robot Integration",
       "markdownAgents": "Markdown Agents",
-      "projectManagement": "Project Management"
+      "projectManagement": "Project Management",
+      "project": "Projects"
     },
     "summary": {
       "login": "User login",
@@ -1736,7 +1737,11 @@
       "listProjectFactEdges": "List all project fact edges",
       "createProjectFactEdge": "Add fact edge",
       "deleteProjectFactEdge": "Delete fact edge",
-      "promoteAttackChainToProject": "Promote conversation attack chain to project fact graph"
+      "promoteAttackChainToProject": "Promote conversation attack chain to project fact graph",
+      "listFailedConversations": "List failed conversations",
+      "continueFailedConversations": "Continue failed conversations",
+      "getDashboardSummary": "Project dashboard summary",
+      "getProjectStatsCounts": "Project stats counts"
     },
     "response": {
       "getSuccess": "Success",
@@ -1797,7 +1802,10 @@
       "success": "Success",
       "edgeList": "Edge list",
       "edgeCreated": "Edge created",
-      "promoteAttackChainResult": "Promotion result (facts/edges/graph)"
+      "promoteAttackChainResult": "Promotion result (facts/edges/graph)",
+      "failedConversationsResult": "Returns {items, count, total, truncated}",
+      "dashboardSummaryResult": "Returns the summary object",
+      "statsCountsDesc": "Returns per-project stats: vuln_count and conversation_count."
     }
   },
   "mcpMonitor": {

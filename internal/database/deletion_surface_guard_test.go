@@ -94,6 +94,26 @@ func TestDeletionSurfacePurity(t *testing.T) {
 		}
 	}
 
+	// rbac-guards 守卫条目：函数名必须对应真实存在的函数（防死映射残留）。
+	guards, err := os.ReadFile(filepath.Join(root, "web/static/js/rbac-guards.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fn := range []string{"showAddFactModal"} {
+		if regexp.MustCompile(regexp.QuoteMeta(fn + ":")).Match(guards) {
+			t.Errorf("rbac-guards.js: 守卫条目 %s 无对应函数（死映射残留）", fn)
+		}
+	}
+
+	// OpenAPI 路径键规范：全部使用 {param} 大括号模板形式，禁止冒号形式。
+	b2, err := os.ReadFile(filepath.Join(root, "internal/handler/openapi.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := regexp.MustCompile(`"/api/[a-zA-Z0-9_-]*/:[a-zA-Z]+"`).Find(b2); m != nil {
+		t.Errorf("openapi.go: spec 路径 %s 使用冒号参数形式，须为 {param} 大括号（OpenAPI 路径模板规范）", m)
+	}
+
 	// 老库遗留表 DDL：NewDB 建表面必须不再包含分组/资产/黑板表
 	dbDDL := []string{"conversation_groups", "conversation_group_mappings", "project_facts", "project_fact_edges", "CREATE TABLE IF NOT EXISTS assets"}
 	ddlSrc, err := os.ReadFile(filepath.Join(root, "internal/database/database.go"))

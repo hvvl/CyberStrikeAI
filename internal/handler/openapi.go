@@ -2417,7 +2417,7 @@ func (h *OpenAPIHandler) GetOpenAPISpec(c *gin.Context) {
 					},
 				},
 			},
-			"/api/projects/:id/stats": map[string]interface{}{
+			"/api/projects/{id}/stats": map[string]interface{}{
 				"get": map[string]interface{}{
 					"tags":        []string{"项目"},
 					"summary":     "项目统计计数",

@@ -44,7 +44,6 @@
         toggleProjectFactGraphConnectMode: 'project:write',
         editProjectFromListMenu: 'project:write',
         toggleProjectArchiveFromListMenu: 'project:write',
-        showAddFactModal: 'project:write',
         showEditFactModal: 'project:write',
         editSelectedGraphFact: 'project:write',
         editFactFromDetail: 'project:write',

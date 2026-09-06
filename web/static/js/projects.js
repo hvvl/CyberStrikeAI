@@ -1098,7 +1098,9 @@ function showNewProjectModalFromChat() {
 /** 从对话侧栏新建项目，保持当前对话的项目绑定不变。 */
 function showNewProjectModalFromChatSidebar() {
     if (!requireProjectWrite()) return;
-            showNewProjectModal();
+    window._projectModalFromChat = false;
+    window._projectModalFromChatSidebar = true;
+    showNewProjectModal();
 }
 
 async function saveProjectModal() {
