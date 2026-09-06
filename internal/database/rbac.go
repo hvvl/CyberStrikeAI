@@ -304,7 +304,7 @@ func (db *DB) BootstrapRBAC(adminPasswordHash string, permissions map[string]str
 	systemRoles := []RBACRole{
 		{ID: RBACSystemRoleAdmin, Name: "管理员", Description: "全局管理权限", Scope: RBACScopeAll, IsSystem: true},
 		{ID: RBACSystemRoleOperator, Name: "操作员", Description: "可执行日常安全工作流，不能管理账号与核心配置", Scope: RBACScopeAssigned, IsSystem: true},
-		{ID: RBACSystemRoleAuditor, Name: "审计员", Description: "只读查看审计、监控与资产", Scope: RBACScopeAll, IsSystem: true},
+		{ID: RBACSystemRoleAuditor, Name: "审计员", Description: "只读查看审计与监控", Scope: RBACScopeAll, IsSystem: true},
 		{ID: RBACSystemRoleViewer, Name: "只读用户", Description: "只读查看被授权资源", Scope: RBACScopeAssigned, IsSystem: true},
 	}
 	for _, role := range systemRoles {

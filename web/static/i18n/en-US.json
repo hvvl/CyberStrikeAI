@@ -28,7 +28,8 @@
     "justNow": "Just now",
     "minutesAgo": "{{n}} min ago",
     "hoursAgo": "{{n}} h ago",
-    "daysAgo": "{{n}} d ago"
+    "daysAgo": "{{n}} d ago",
+    "retry": "Retry"
   },
   "header": {
     "title": "CyberStrikeAI",
@@ -698,7 +699,9 @@
     "hitlTimeoutUnlimited": "No limit",
     "hitlTimeoutHint": "Unanswered requests are rejected automatically when time expires; approval cards show the countdown.",
     "hitlStatusOff": "Human-in-the-loop: Off",
-    "rolePanelTitle": "Select role"
+    "rolePanelTitle": "Select role",
+    "pleaseLoadAttackChainFirst": "Please load an attack chain first",
+    "workflowAwaitingApproval": "Workflow awaiting approval"
   },
   "hitl": {
     "pageTitle": "HITL approvals",
@@ -1141,7 +1144,10 @@
     "colPerms": "Permissions",
     "colOwner": "Owner",
     "colGroup": "Group",
-    "colType": "Type"
+    "colType": "Type",
+    "boundProject": "Project",
+    "unboundProject": "Unbound",
+    "dbProfileName": "Profile name"
   },
   "mcp": {
     "monitorTitle": "MCP Status Monitor",
@@ -2850,7 +2856,9 @@
     "queuedOne": "Added to the background resume queue. Open the conversation to track progress.",
     "queueFailed": "Failed to add to the resume queue",
     "queuedAll": "Added {{count}} failed conversation(s) to the background resume queue.",
-    "allSkipped": "No conversations can be continued (already running or queued)."
+    "allSkipped": "No conversations can be continued (already running or queued).",
+    "truncatedHint": "Showing the most recent 100 ({{total}} total)",
+    "continueAllHint": "Click \"Continue All\" to enqueue all {{total}} failed conversations for background execution."
   },
   "batchManageModal": {
     "title": "Manage conversations · {{count}} total",
@@ -3884,7 +3892,9 @@
       "toastDeleted": "Profile deleted",
       "confirmDelete": "Delete this profile?",
       "submitCreate": "Create"
-    }
+    },
+    "boundProject": "Project",
+    "unboundProject": "Unbound"
   },
   "rbac": {
     "title": "Platform Access",

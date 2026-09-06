@@ -638,7 +638,7 @@ function webshellConnectionProjectId(conn) {
 
 function webshellProjectOptionsHtml(selectedId) {
     var selected = String(selectedId || '').trim();
-    var html = '<option value="">' + escapeHtml(wsT('assets.unboundProject') || '暂不绑定') + '</option>';
+    var html = '<option value="">' + escapeHtml(wsT('webshell.unboundProject') || '暂不绑定') + '</option>';
     var entries = [];
     try {
         if (typeof projectNameById !== 'undefined') entries = Object.entries(projectNameById);

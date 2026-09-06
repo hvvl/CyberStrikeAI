@@ -12065,10 +12065,6 @@ html[data-theme="dark"] .robot-binding-service-hint-icon {
     to { transform: rotate(360deg); }
 }
 
-.fofa-nl-status {
-    margin-top: 6px;
-    font-size: 0.8125rem;
-}
 
 .btn-danger {
     padding: 10px 20px;
@@ -37327,14 +37323,7 @@ html[data-theme="dark"] .info-collect-query-input:focus {
 }
 
 html[data-theme="dark"] #page-info-collect .form-hint,
-html[data-theme="dark"] #fofa-parse-modal .form-hint {
-    color: var(--text-secondary) !important;
-}
 
-html[data-theme="dark"] #fofa-parse-modal .muted,
-html[data-theme="dark"] #fofa-parse-modal .info-collect-parse-nl-text {
-    color: var(--text-secondary) !important;
-}
 
 html[data-theme="dark"] .info-collect-parse-warnings {
     background: rgba(251, 191, 36, 0.10) !important;

@@ -1789,7 +1789,7 @@
                                             <span id="projects-detail-meta-time" class="projects-detail-meta-time"></span>
                                         </span>
                                         <button type="button" class="btn-secondary btn-small" onclick="openVulnerabilitiesForProject()" data-i18n="projects.vulnerabilityManagement">漏洞管理</button>
-                                        <button type="button" class="btn-primary btn-small" data-require-permission="project:write" onclick="showAddFactModal()" data-i18n="projects.addFactCta">+ 添加事实</button>
+                                        
                                     </div>
                                 </header>
                                 <nav class="projects-tabs" role="tablist">
@@ -4422,8 +4422,7 @@
                                                                 <option value="project" data-i18n="rbac.resourceTypes.project">项目</option>
                                                                 <option value="batch_task" data-i18n="rbac.resourceTypes.batch_task">批量任务</option>
                                                                 <option value="vulnerability" data-i18n="rbac.resourceTypes.vulnerability">漏洞</option>
-                                                                <option value="asset" data-i18n="rbac.resourceTypes.asset">资产</option>
-                                                                <option value="webshell" data-i18n="rbac.resourceTypes.webshell">WebShell 连接</option>
+                                                                                                                                <option value="webshell" data-i18n="rbac.resourceTypes.webshell">WebShell 连接</option>
                                                                 <option value="c2_listener" data-i18n="rbac.resourceTypes.c2_listener">C2 监听器</option>
                                                             </select>
                                                             <input id="rbac-resource-search" class="form-input" type="search" placeholder="按名称或 ID 搜索可授权资源" data-i18n="rbac.searchResourcePlaceholder" data-i18n-attr="placeholder" oninput="queueRbacResourceSearch(this.value)">
@@ -4451,8 +4450,7 @@
                                                                     <option value="project" data-i18n="rbac.resourceTypes.project">项目</option>
                                                                     <option value="batch_task" data-i18n="rbac.resourceTypes.batch_task">批量任务</option>
                                                                     <option value="vulnerability" data-i18n="rbac.resourceTypes.vulnerability">漏洞</option>
-                                                                    <option value="asset" data-i18n="rbac.resourceTypes.asset">资产</option>
-                                                                    <option value="webshell" data-i18n="rbac.resourceTypes.webshell">WebShell 连接</option>
+                                                                                                                                        <option value="webshell" data-i18n="rbac.resourceTypes.webshell">WebShell 连接</option>
                                                                     <option value="c2_listener" data-i18n="rbac.resourceTypes.c2_listener">C2 监听器</option>
                                                                 </select>
                                                                 <input id="rbac-assignment-search" class="form-input" type="search" placeholder="搜索已授权资源名称或 ID" data-i18n="rbac.searchAssignments" data-i18n-attr="placeholder" oninput="filterRbacAssignments(this.value)">
@@ -4492,8 +4490,7 @@
                                                                 <option value="project" data-i18n="rbac.resourceTypes.project">项目</option>
                                                                 <option value="conversation" data-i18n="rbac.resourceTypes.conversation">对话</option>
                                                                 <option value="vulnerability" data-i18n="rbac.resourceTypes.vulnerability">漏洞</option>
-                                                                <option value="asset" data-i18n="rbac.resourceTypes.asset">资产</option>
-                                                                <option value="webshell" data-i18n="rbac.resourceTypes.webshell">WebShell 连接</option>
+                                                                                                                                <option value="webshell" data-i18n="rbac.resourceTypes.webshell">WebShell 连接</option>
                                                                 <option value="batch_task" data-i18n="rbac.resourceTypes.batch_task">批量任务</option>
                                                                 <option value="c2_listener" data-i18n="rbac.resourceTypes.c2_listener">C2 监听器</option>
                                                             </select>
@@ -5722,9 +5719,9 @@
                     <small class="form-hint" data-i18n="webshell.encodingHint">中文 Windows 目标若出现乱码，请切换为 GBK 或 GB18030</small>
                 </div>
                 <div class="form-group">
-                    <label for="webshell-project-id" data-i18n="assets.project">所属项目</label>
+                    <label for="webshell-project-id" data-i18n="webshell.boundProject">所属项目</label>
                     <select id="webshell-project-id">
-                        <option value="" data-i18n="assets.unboundProject">暂不绑定</option>
+                        <option value="" data-i18n="webshell.unboundProject">暂不绑定</option>
                     </select>
                 </div>
                 <div class="form-group">

@@ -28,7 +28,8 @@
     "justNow": "刚刚",
     "minutesAgo": "{{n}} 分钟前",
     "hoursAgo": "{{n}} 小时前",
-    "daysAgo": "{{n}} 天前"
+    "daysAgo": "{{n}} 天前",
+    "retry": "重试"
   },
   "header": {
     "title": "CyberStrikeAI",
@@ -687,7 +688,9 @@
     "hitlTimeoutUnlimited": "不限制",
     "hitlTimeoutHint": "到期未处理将自动拒绝；审批卡片会显示倒计时。",
     "hitlStatusOff": "人机协同：关闭",
-    "rolePanelTitle": "选择角色"
+    "rolePanelTitle": "选择角色",
+    "pleaseLoadAttackChainFirst": "请先加载攻击链",
+    "workflowAwaitingApproval": "工作流等待审批"
   },
   "hitl": {
     "pageTitle": "人机协同审批",
@@ -1130,7 +1133,10 @@
     "colPerms": "权限",
     "colOwner": "所有者",
     "colGroup": "用户组",
-    "colType": "类型"
+    "colType": "类型",
+    "boundProject": "所属项目",
+    "unboundProject": "暂不绑定",
+    "dirTree": "目录树"
   },
   "mcp": {
     "monitorTitle": "MCP 状态监控",
@@ -2839,7 +2845,9 @@
     "queuedOne": "已加入后台续跑队列，可打开该会话查看进度。",
     "queueFailed": "加入续跑队列失败",
     "queuedAll": "已将 {{count}} 个失败会话加入后台续跑队列。",
-    "allSkipped": "没有可继续的会话（正在执行或已在队列中）。"
+    "allSkipped": "没有可继续的会话（正在执行或已在队列中）。",
+    "truncatedHint": "当前显示最近 100 条（共 {{total}} 条）",
+    "continueAllHint": "点击「全部继续」将把全部 {{total}} 个失败会话加入后台续跑队列。"
   },
   "batchManageModal": {
     "title": "管理对话记录·共{{count}}条",
@@ -3873,7 +3881,9 @@
       "toastDeleted": "Profile 已删除",
       "confirmDelete": "确定删除此 Profile？",
       "submitCreate": "创建"
-    }
+    },
+    "boundProject": "所属项目",
+    "unboundProject": "暂不绑定"
   },
   "rbac": {
     "title": "平台权限",

@@ -1893,6 +1893,11 @@ function initChatPrimaryActionButton() {
     updateChatPrimaryActionState();
 }
 
+// P0 修复：上游 c70da22 删除分组时连带移除了本函数的调用点（定义成为死代码），
+// 运行态主按钮 onclick 恒为内联 sendMessage()（撞 sendMessage 内运行守卫，无法停止任务）。
+// handleChatPrimaryAction 在非运行态转发 sendMessage，发送语义不变。
+window.initChatPrimaryActionButton = initChatPrimaryActionButton;
+
 function closeChatReasoningPanel() {
     const wrap = document.getElementById('chat-reasoning-wrapper');
     const toggle = document.getElementById('conversation-reasoning-toggle');
@@ -11132,6 +11137,10 @@ document.addEventListener('languagechange', function () {
 
 // 初始化时加载对话列表
 document.addEventListener('DOMContentLoaded', async () => {
+    // P0 修复：补挂主按钮绑定（详见 initChatPrimaryActionButton 处注释）
+    if (typeof initChatPrimaryActionButton === 'function') {
+        initChatPrimaryActionButton();
+    }
     ensureProjectSidebarStructure();
     if (window.i18nReady) await window.i18nReady;
     if (typeof window.applyTranslations === 'function') {
@@ -11391,8 +11400,9 @@ async function continueAllFailedConversations() {
             renderContinueFailedList();
             alert(_cfT('continueFailedModal.queuedAll', '已将 ' + queued + ' 个失败会话加入后台续跑队列。', { count: queued }));
             closeContinueFailedModal();
-            if (typeof loadConversationsWithGroups === 'function') {
-                loadConversationsWithGroups();
+            // P1 修复：上游已移除分组版载入函数，统一改用 loadConversations 刷新侧栏
+            if (typeof loadConversations === 'function') {
+                loadConversations();
             }
         } else {
             const skipped = data && Array.isArray(data.skipped) ? data.skipped : [];

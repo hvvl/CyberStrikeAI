@@ -100,13 +100,6 @@
         submitMcpToolAbortModal: 'monitor:write',
         cancelMCPToolExecution: 'monitor:write',
 
-        // FOFA / 信息收集
-        importSelectedFofaAssets: 'asset:write',
-        importFofaRowAsset: 'asset:write',
-        openAssetImport: 'asset:write',
-        submitAssetImport: 'asset:write',
-        saveAsset: 'asset:write',
-        deleteAsset: 'asset:delete',
 
         // 任务队列
         showBatchImportModal: 'tasks:write',

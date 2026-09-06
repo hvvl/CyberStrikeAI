@@ -98,7 +98,7 @@
 
     function c2ProjectOptionsHtml(selectedId, projectList) {
         const selected = String(selectedId || '').trim();
-        let html = `<option value="">${escapeHtml(c2t('assets.unboundProject') || '暂不绑定')}</option>`;
+        let html = `<option value="">${escapeHtml(c2t('c2.unboundProject') || '暂不绑定')}</option>`;
         let entries = [];
         if (Array.isArray(projectList) && projectList.length) {
             entries = projectList
@@ -147,7 +147,7 @@
     }
 
     function c2ProjectBindSelectHtml(listener) {
-        return `<select class="c2-project-bind-select" data-id="${escapeAttr(listener.id || '')}" title="${escapeAttr(c2t('assets.project') || '所属项目')}" onclick="event.stopPropagation()" onchange="C2.bindListenerProject(this.dataset.id, this.value)">${c2ProjectOptionsHtml(c2ResourceProjectId(listener))}</select>`;
+        return `<select class="c2-project-bind-select" data-id="${escapeAttr(listener.id || '')}" title="${escapeAttr(c2t('c2.boundProject') || '所属项目')}" onclick="event.stopPropagation()" onchange="C2.bindListenerProject(this.dataset.id, this.value)">${c2ProjectOptionsHtml(c2ResourceProjectId(listener))}</select>`;
     }
 
     function withC2ProjectQuery(url) {
@@ -932,7 +932,7 @@
                 ? '<div class="c2-listener-kv"><span class="c2-listener-kv-label">' + escapeHtml(c2t('c2.listeners.callbackShort')) + '</span><span class="c2-listener-kv-val c2-listener-mono">' + escapeHtml(cb) + '</span></div>'
                 : '';
             const remarkRow = l.remark ? '<div class="c2-listener-remark">' + escapeHtml(l.remark) + '</div>' : '';
-            const projectRow = '<div class="c2-listener-kv"><span class="c2-listener-kv-label">' + escapeHtml(c2t('assets.project') || '所属项目') + '</span><span class="c2-listener-kv-val">' + c2ProjectBindSelectHtml(l) + '</span></div>';
+            const projectRow = '<div class="c2-listener-kv"><span class="c2-listener-kv-label">' + escapeHtml(c2t('c2.boundProject') || '所属项目') + '</span><span class="c2-listener-kv-val">' + c2ProjectBindSelectHtml(l) + '</span></div>';
             const startedHtml = formatListenerStartedHtml(l.startedAt);
             const pillLabel = escapeHtml(listenerCardStatusPillLabel(st));
             const typeMark = escapeHtml(listenerTypeShortLabel(l.type));
@@ -1049,7 +1049,7 @@
                     </div>
                 </div>
                 <div class="c2-form-group">
-                    <label>${escapeHtml(c2t('assets.project') || '所属项目')}</label>
+                    <label>${escapeHtml(c2t('c2.boundProject') || '所属项目')}</label>
                     <select id="c2-listener-project-id" class="form-control c2-form-select-native">${projectOpts}</select>
                 </div>
                 <div class="c2-form-row">
@@ -1267,7 +1267,7 @@
                     <input type="text" id="c2-listener-name" class="form-control" value="${escapeAttr(l.name)}">
                 </div>
                 <div class="c2-form-group">
-                    <label>${escapeHtml(c2t('assets.project') || '所属项目')}</label>
+                    <label>${escapeHtml(c2t('c2.boundProject') || '所属项目')}</label>
                     <select id="c2-listener-project-id" class="form-control c2-form-select-native">${projectOpts}</select>
                 </div>
                 <div class="c2-form-row">
