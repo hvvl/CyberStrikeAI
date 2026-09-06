@@ -102,9 +102,6 @@ Content-Type: application/json
 - `GET /api/projects/:id`
 - `PUT /api/projects/:id`
 - `DELETE /api/projects/:id`
-- `GET /api/projects/:id/facts`
-- `POST /api/projects/:id/facts`
-- `GET /api/projects/:id/fact-graph`
 
 漏洞：
 
@@ -119,136 +116,6 @@ Content-Type: application/json
 
 - `GET /api/attack-chain/:conversationId`
 - `POST /api/attack-chain/:conversationId/regenerate`
-
-## 资产管理与批量导入
-
-资产接口：
-
-- `GET /api/assets`：分页查询资产；
-- `GET /api/assets/selection`：按当前筛选条件解析跨页选择，最多返回 10000 条；
-- `GET /api/assets/stats`：获取资产统计，`days` 仅支持 `7`、`30` 或 `90`；
-- `POST /api/assets/import`：新增或去重更新资产，单次最多 100000 条；
-- `POST /api/assets/scan-links`：批量记录扫描关联，单次最多 10000 条；
-- `PUT /api/assets/bulk`：原子批量更新最多 10000 个资产；
-- `PUT /api/assets/project-binding`：批量绑定项目，单次最多 10000 个资产 ID；
-- `POST /api/assets/batch-delete`：原子批量删除最多 10000 个资产；
-- `POST /api/assets/merge`：合并 2-100 个具有共同身份的重复资产；
-- `PUT /api/assets/:id`：更新资产；
-- `DELETE /api/assets/:id`：删除资产。
-
-`GET /api/assets` 和 `GET /api/assets/selection` 使用相同的筛选与排序参数；`selection` 会忽略分页参数并返回全部匹配项（最多 10000 条）：
-
-| 类别 | 参数 |
-| --- | --- |
-| 分页（仅列表） | `page`、`page_size`（最大 100） |
-| 常用 | `q`、`status`、`project_id`、`risk_level`、`min_vulnerabilities`、`max_vulnerabilities` |
-| 目标与来源 | `host`、`ip`、`domain`、`port`、`protocol`、`source`、`tag` |
-| 责任与业务 | `responsible_person`、`department`、`business_system`、`environment`、`criticality` |
-| 地理 | `country`、`province`、`city` |
-| 扫描 | `scan_state=never|scanned`、`scan_overdue_days`、`last_scan_before`、`last_scan_after` |
-| 发现时间 | `first_seen_before`、`first_seen_after`、`last_seen_before`、`last_seen_after` |
-| 排序 | `sort_by`、`sort_order=asc|desc` |
-
-时间参数接受 RFC3339 或 `YYYY-MM-DD`。`sort_by` 支持 `last_seen_at`、`last_scan_at`、`first_seen_at`、`created_at`、`updated_at`、`host`、`port`、`risk_level` 和 `vulnerability_count`。
-
-`POST /api/assets/import` 接收 JSON，而不是 XLSX/CSV 文件。Web 端会在浏览器中解析模板、预览并转换为该请求格式：
-
-```http
-POST /api/assets/import
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "source": "manual-import",
-  "source_query": "asset-import-2026-07.xlsx",
-  "assets": [
-    {
-      "host": "https://app.example.com:443",
-      "domain": "app.example.com",
-      "port": 443,
-      "protocol": "https",
-      "title": "Example App",
-      "server": "nginx",
-      "project_id": "<project-id>",
-      "responsible_person": "Alice",
-      "department": "Security",
-      "business_system": "Customer Portal",
-      "environment": "production",
-      "criticality": "critical",
-      "tags": ["production", "internet"],
-      "status": "active"
-    },
-    {
-      "ip": "192.0.2.10",
-      "port": 22,
-      "protocol": "ssh",
-      "status": "active"
-    }
-  ]
-}
-```
-
-请求规则：
-
-- `assets` 必须包含 `1-100000` 条；
-- 每条资产的 `host`、`ip`、`domain` 至少一项非空；
-- `port` 范围为 `0-65535`；
-- `status` 仅支持 `active` 或 `inactive`；
-- `environment` 支持空值或 `production`、`staging`、`testing`、`development`、`other`；
-- `criticality` 支持空值或 `critical`、`high`、`medium`、`low`；
-- 标签最多 30 个，单个最多 64 个字符；
-- `project_id` 非空时，调用者必须有权访问该项目；
-- 需要 `asset:write` 权限；
-- 服务端按“目标 + 端口 + 协议”去重，并在同一事务中处理本次请求。
-
-成功响应：
-
-```json
-{
-  "created": 120,
-  "updated": 8,
-  "skipped": 2
-}
-```
-
-- `created`：新建数量；
-- `updated`：命中去重键并合并更新的数量；
-- `skipped`：空记录或因资源归属不可更新而跳过的数量。
-
-字段校验失败返回 `400`，且响应 `error` 会包含出错资产的顺序。项目无权访问返回 `403`。批量导入的模板字段和 UI 操作见[资产管理指南](asset-management.md#从表格批量导入)。
-
-批量编辑示例：
-
-```http
-PUT /api/assets/bulk
-Content-Type: application/json
-
-{
-  "asset_ids": ["<asset-id-1>", "<asset-id-2>"],
-  "responsible_person": "Alice",
-  "department": "Security",
-  "environment": "production",
-  "criticality": "high",
-  "add_tags": ["internet-facing"],
-  "remove_tags": ["untriaged"]
-}
-```
-
-批量字段均为可选；未提供的字段保持原值。`add_tags` 和 `remove_tags` 会在事务内去重处理。批量编辑、项目绑定和批量删除会先验证全部资产的可访问性，任一 ID 不存在或无权访问时整批失败。
-
-重复资产合并示例：
-
-```http
-POST /api/assets/merge
-Content-Type: application/json
-
-{
-  "asset_ids": ["<primary-id>", "<duplicate-id>"],
-  "primary_id": "<primary-id>"
-}
-```
-
-每个待删除记录必须与主资产共享域名、IP 或 Host。主资产已有字段优先，空字段从其他记录补齐，标签取并集；调用者需要更新主资产和删除其余资产的权限。
 
 ## 工具、MCP、配置
 
@@ -369,7 +236,6 @@ C2：
 | `/api/auth/*` | 高 | 可直接集成 |
 | `/api/eino-agent*` | 高 | 推荐外部对话入口 |
 | `/api/openapi/spec` | 高 | 用于生成客户端 |
-| `/api/assets/*` | 高 | 资产管理与批量导入 |
 | `/api/config*` | 中 | 管理工具使用，谨慎自动化 |
 | `/api/c2/*`、`/api/webshell/*` | 中 | 高风险，必须加权限边界 |
 | 前端私有调用细节 | 低 | 不建议插件依赖 |
@@ -399,5 +265,3 @@ curl -k https://127.0.0.1:8080/api/eino-agent \
 - OpenAPI：`internal/handler/openapi.go`
 - 单代理：`internal/handler/eino_single_agent.go`
 - 多代理：`internal/handler/multi_agent.go`
-- 资产接口：`internal/handler/asset.go`
-- 资产存储与去重：`internal/database/asset.go`

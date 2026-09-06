@@ -25,7 +25,7 @@ hitl:
     api_key: ""
     model: "" # set a small model here; blank reuses the default AI channel model
   retention_days: 90
-  tool_whitelist: [read_file, ls, glob, grep, tool_search, get_project_fact, list_project_facts, search_project_facts, list_vulnerabilities, get_vulnerability, get_asset, query_assets, list_knowledge_risk_types, get_tool_execution, wait_tool_execution, batch_task_list, batch_task_get, manage_webshell_list, c2_event, c2_file]
+  tool_whitelist: [read_file, ls, glob, grep, tool_search, list_vulnerabilities, get_vulnerability, list_knowledge_risk_types, get_tool_execution, wait_tool_execution, batch_task_list, batch_task_get, manage_webshell_list, c2_event, c2_file]
 ```
 
 `audit_model` supports partial configuration. Empty fields inherit from the resolved default AI channel, so the common setup is to fill only `model` and run approvals on a cheaper small model.
@@ -95,8 +95,8 @@ Allowlisted tools skip approval, so keep the list stable and low-risk. Recommend
 - `glob`
 - `grep`
 - `tool_search`
-- Project and vulnerability reads: `get_project_fact`, `list_project_facts`, `search_project_facts`, `list_vulnerabilities`, `get_vulnerability`
-- Asset and knowledge-metadata reads: `get_asset`, `query_assets`, `list_knowledge_risk_types`
+- Project and vulnerability reads: `list_vulnerabilities`, `get_vulnerability`
+- Knowledge-metadata reads: `list_knowledge_risk_types`
 - Execution and task-state reads: `get_tool_execution`, `wait_tool_execution`, `batch_task_list`, `batch_task_get`
 - Local management-metadata reads: `manage_webshell_list`, `c2_event`, `c2_file`
 

@@ -101,7 +101,6 @@ Burp 插件目录包含 Java 源码和构建脚本。典型能力：
 - 优先调用 `/api/eino-agent/stream` 或 `/api/multi-agent/stream`（SSE）。
 - 大文件通过 `/api/chat-uploads` 上传，再在消息中引用。
 - 查询结果或漏洞可写入 `/api/vulnerabilities`。
-- 项目信息可写入 `/api/projects/:id/facts`。
 
 完整接口以 `/api-docs` 为准。
 

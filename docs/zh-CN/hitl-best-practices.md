@@ -25,7 +25,7 @@ hitl:
     api_key: ""
     model: "" # 可填小模型；留空复用默认 AI 通道的模型
   retention_days: 90
-  tool_whitelist: [read_file, ls, glob, grep, tool_search, get_project_fact, list_project_facts, search_project_facts, list_vulnerabilities, get_vulnerability, get_asset, query_assets, list_knowledge_risk_types, get_tool_execution, wait_tool_execution, batch_task_list, batch_task_get, manage_webshell_list, c2_event, c2_file]
+  tool_whitelist: [read_file, ls, glob, grep, tool_search, list_vulnerabilities, get_vulnerability, list_knowledge_risk_types, get_tool_execution, wait_tool_execution, batch_task_list, batch_task_get, manage_webshell_list, c2_event, c2_file]
 ```
 
 `audit_model` 的字段可以只填一部分。空字段会自动继承默认 AI 通道解析后的模型配置，因此常见做法是只填 `model`，让审计 Agent 使用更便宜的小模型。
@@ -95,8 +95,8 @@ hitl:
 - `glob`
 - `grep`
 - `tool_search`
-- 项目与漏洞查询：`get_project_fact`、`list_project_facts`、`search_project_facts`、`list_vulnerabilities`、`get_vulnerability`
-- 资产与知识元数据查询：`get_asset`、`query_assets`、`list_knowledge_risk_types`
+- 项目与漏洞查询：`list_vulnerabilities`、`get_vulnerability`
+- 知识元数据查询：`list_knowledge_risk_types`
 - 执行与任务状态查询：`get_tool_execution`、`wait_tool_execution`、`batch_task_list`、`batch_task_get`
 - 本地管理元数据查询：`manage_webshell_list`、`c2_event`、`c2_file`
 
